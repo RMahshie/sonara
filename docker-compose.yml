@@ -1,0 +1,41 @@
+version: '3.8'
+
+services:
+  # PostgreSQL - always needed
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: sonara
+      POSTGRES_PASSWORD: localdev
+      POSTGRES_DB: sonara_dev
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  # MinIO - local S3 for development
+  minio:
+    image: minio/minio
+    ports:
+      - "9000:9000"     # S3 API
+      - "9001:9001"     # Web console
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+
+  # Python analyzer - consistent environment
+  analyzer:
+    build:
+      context: ./scripts
+      dockerfile: Dockerfile
+    volumes:
+      - ./scripts:/app
+      - /tmp:/tmp  # Shared with host for audio files
+    command: tail -f /dev/null  # Keep container running
+
+volumes:
+  postgres_data:
+  minio_data:
