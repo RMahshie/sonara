@@ -8,12 +8,14 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+
+	"github.com/RMahshie/sonara/pkg/models"
 )
 
 func main() {
@@ -43,8 +45,8 @@ func main() {
 		Path:        "/health",
 		Summary:     "Health check",
 		Description: "Returns the health status of the service",
-	}, func(ctx context.Context, input *struct{}) (*HealthResponse, error) {
-		resp := &HealthResponse{}
+	}, func(ctx context.Context, input *struct{}) (*models.HealthResponse, error) {
+		resp := &models.HealthResponse{}
 		resp.Body.Status = "healthy"
 		resp.Body.Version = "1.0.0"
 		resp.Body.Time = time.Now()
@@ -89,15 +91,6 @@ func main() {
 	}
 
 	log.Info().Msg("Server exited")
-}
-
-// HealthResponse represents the health check response
-type HealthResponse struct {
-	Body struct {
-		Status  string    `json:"status" example:"healthy" doc:"Service health status"`
-		Version string    `json:"version" example:"1.0.0" doc:"API version"`
-		Time    time.Time `json:"time" doc:"Current server time"`
-	}
 }
 
 // zerologLogger returns a Chi middleware that logs HTTP requests using zerolog
