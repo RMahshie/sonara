@@ -30,7 +30,7 @@ export const analysisService = {
     const formData = new FormData()
     formData.append('file', file)
 
-    const response = await api.post<UploadResponse>('/api/analyses', formData, {
+    const response = await api.post<UploadResponse>('/analyses', formData, {
       headers: {
         'Content-Type': 'multipart/form-data',
       },
@@ -41,19 +41,20 @@ export const analysisService = {
 
   // Get analysis status
   getAnalysisStatus: async (id: string): Promise<AnalysisStatus> => {
-    const response = await api.get<AnalysisStatus>(`/api/analyses/${id}/status`)
+    const response = await api.get<AnalysisStatus>(`/analyses/${id}/status`)
     return response.data
   },
 
   // Get analysis results
   getAnalysisResults: async (id: string): Promise<AnalysisResult> => {
-    const response = await api.get<AnalysisResult>(`/api/analyses/${id}/results`)
+    const response = await api.get<AnalysisResult>(`/analyses/${id}/results`)
     return response.data
   },
 
   // Get all analyses
   getAnalyses: async (): Promise<AnalysisStatus[]> => {
-    const response = await api.get<AnalysisStatus[]>('/api/analyses')
+    const response = await api.get<AnalysisStatus[]>('/analyses')
     return response.data
   },
 }
+

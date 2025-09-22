@@ -49,11 +49,23 @@ dev-web:
 # Database commands
 .PHONY: migrate-up
 migrate-up:
-	migrate -path migrations -database "${DATABASE_URL}" up
+	@if [ -f .env.dev ]; then \
+		export DATABASE_URL=$$(grep '^DATABASE_URL=' .env.dev | cut -d '=' -f2-); \
+		migrate -path migrations -database "$$DATABASE_URL" up; \
+	else \
+		echo "Error: .env.dev file not found"; \
+		exit 1; \
+	fi
 
 .PHONY: migrate-down
 migrate-down:
-	migrate -path migrations -database "${DATABASE_URL}" down 1
+	@if [ -f .env.dev ]; then \
+		export DATABASE_URL=$$(grep '^DATABASE_URL=' .env.dev | cut -d '=' -f2-); \
+		migrate -path migrations -database "$$DATABASE_URL" down 1; \
+	else \
+		echo "Error: .env.dev file not found"; \
+		exit 1; \
+	fi
 
 .PHONY: migrate-create
 migrate-create:

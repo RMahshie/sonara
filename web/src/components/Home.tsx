@@ -1,4 +1,4 @@
-import FileUpload from './FileUpload'
+import LiveRecorder from './LiveRecorder'
 
 const Home = () => {
   return (
@@ -9,15 +9,16 @@ const Home = () => {
         </h1>
         <p className="text-xl text-racing-green/80 max-w-2xl mx-auto">
           Advanced audio analysis for music professionals.
-          Upload your audio files and get detailed frequency analysis.
+          Analyze your room acoustics with professional-grade measurements.
         </p>
       </div>
 
       <div className="bg-white/70 backdrop-blur-sm rounded-2xl p-8 shadow-xl">
-        <FileUpload />
+        <LiveRecorder />
       </div>
     </div>
   )
 }
 
 export default Home
+
