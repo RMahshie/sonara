@@ -249,3 +249,6 @@ dmypy.json
 /tmp/*.wav
 /tmp/*.mp3
 /tmp/*.flac
+
+.env.prod
+.env.dev
