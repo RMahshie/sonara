@@ -26,9 +26,18 @@ export function useAnalysisStatus(analysisId: string | null) {
             if (response.data.status === 'completed' || response.data.status === 'failed') {
                 setIsPolling(false);
             }
-        } catch (err) {
+        } catch (err: any) {
             console.error('Failed to fetch status:', err);
-            setError('Failed to fetch analysis status');
+            // Use backend-provided error messages when available
+            if (err.response?.data?.message) {
+                setError(err.response.data.message);
+            } else if (err.response?.status === 413) {
+                setError('Recording file is too large for upload.');
+            } else if (!navigator.onLine) {
+                setError('No internet connection. Please check your network.');
+            } else {
+                setError('Failed to fetch analysis status');
+            }
             setIsPolling(false);
         }
     }, [analysisId]);

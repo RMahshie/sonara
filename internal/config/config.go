@@ -2,6 +2,8 @@ package config
 
 import (
 	"github.com/spf13/viper"
+
+	"strings"
 )
 
 // Config holds all configuration for the application
@@ -19,8 +21,9 @@ type DatabaseConfig struct {
 
 // ServerConfig holds server configuration
 type ServerConfig struct {
-	Port string
-	Env  string
+	Port           string
+	Env            string
+	AllowedOrigins []string
 }
 
 // AWSConfig holds AWS/S3 configuration
@@ -48,6 +51,7 @@ func Load() (*Config, error) {
 	viper.SetDefault("AWS_SECRET_ACCESS_KEY", "")
 	viper.SetDefault("S3_BUCKET", "sonara-dev-audio")
 	viper.SetDefault("S3_ENDPOINT", "http://localhost:9000")
+	viper.SetDefault("ALLOWED_ORIGINS", "http://localhost:5173,http://localhost:3000")
 	viper.SetDefault("OPENAI_API_KEY", "")
 
 	// Read from .env files based on environment
@@ -76,12 +80,14 @@ func Load() (*Config, error) {
 	viper.BindEnv("AWS_SECRET_ACCESS_KEY")
 	viper.BindEnv("S3_BUCKET")
 	viper.BindEnv("S3_ENDPOINT")
+	viper.BindEnv("ALLOWED_ORIGINS")
 	viper.BindEnv("OPENAI_API_KEY")
 
 	var config Config
 	config.Database.URL = viper.GetString("DATABASE_URL")
 	config.Server.Port = viper.GetString("PORT")
 	config.Server.Env = viper.GetString("ENVIRONMENT")
+	config.Server.AllowedOrigins = strings.Split(viper.GetString("ALLOWED_ORIGINS"), ",")
 	config.AWS.Region = viper.GetString("AWS_REGION")
 	config.AWS.AccessKeyID = viper.GetString("AWS_ACCESS_KEY_ID")
 	config.AWS.SecretAccessKey = viper.GetString("AWS_SECRET_ACCESS_KEY")

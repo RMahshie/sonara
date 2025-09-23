@@ -1,8 +1,10 @@
 import { api } from './api'
+import axios from 'axios'
 
-export interface UploadResponse {
-  analysisId: string
-  uploadUrl: string
+export interface CreateAnalysisResponse {
+  id: string
+  upload_url: string
+  expires_in: number
 }
 
 export interface AnalysisStatus {
@@ -25,18 +27,35 @@ export interface AnalysisResult {
 }
 
 export const analysisService = {
-  // Upload audio file
-  uploadFile: async (file: File): Promise<UploadResponse> => {
-    const formData = new FormData()
-    formData.append('file', file)
-
-    const response = await api.post<UploadResponse>('/analyses', formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
+  // Create analysis and get upload URL
+  createAnalysis: async (sessionId: string, file: File): Promise<CreateAnalysisResponse> => {
+    const response = await api.post<CreateAnalysisResponse>('/analyses', {
+      session_id: sessionId,
+      file_size: file.size,
+      mime_type: file.type
     })
 
     return response.data
+  },
+
+  // Upload file directly to S3
+  uploadToS3: async (uploadUrl: string, file: File, onProgress?: (progress: number) => void): Promise<void> => {
+    await axios.put(uploadUrl, file, {
+      headers: {
+        'Content-Type': file.type,
+      },
+      onUploadProgress: (progressEvent) => {
+        if (onProgress && progressEvent.total) {
+          const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total)
+          onProgress(percent)
+        }
+      },
+    })
+  },
+
+  // Start processing the uploaded file
+  startProcessing: async (analysisId: string): Promise<void> => {
+    await api.post(`/analyses/${analysisId}/process`)
   },
 
   // Get analysis status

@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
@@ -66,8 +65,8 @@ func main() {
 		log.Fatal().Err(err).Msg("Failed to initialize S3 service")
 	}
 
-	// Initialize processing service (for future use)
-	_ = processing.NewProcessingService(s3Service, analysisRepo, "scripts/analyze_audio.py")
+	// Initialize processing service
+	processingSvc := processing.NewProcessingService(s3Service, analysisRepo, "scripts/analyze_audio.py")
 
 	// Create Chi router
 	router := chi.NewRouter()
@@ -80,24 +79,13 @@ func main() {
 	router.Use(middleware.Compress(5))
 
 	// CORS middleware
-	allowedOrigins := os.Getenv("ALLOWED_ORIGINS")
-	if allowedOrigins != "" {
-		router.Use(cors.Handler(cors.Options{
-			AllowedOrigins:   strings.Split(allowedOrigins, ","),
-			AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-			AllowedHeaders:   []string{"*"},
-			AllowCredentials: true,
-			MaxAge:           300,
-		}))
-	} else {
-		// Default to allowing localhost for development
-		router.Use(cors.Handler(cors.Options{
-			AllowedOrigins:   []string{"http://localhost:5173", "http://localhost:3000"},
-			AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-			AllowedHeaders:   []string{"*"},
-			AllowCredentials: true,
-		}))
-	}
+	router.Use(cors.Handler(cors.Options{
+		AllowedOrigins:   cfg.Server.AllowedOrigins,
+		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowedHeaders:   []string{"*"},
+		AllowCredentials: true,
+		MaxAge:           300,
+	}))
 
 	// Create Huma API
 	config := huma.DefaultConfig("Sonara API", "1.0.0")
@@ -120,7 +108,7 @@ func main() {
 	})
 
 	// Register analysis routes
-	apiPkg.RegisterRoutes(router, api, db, s3Service, analysisRepo)
+	apiPkg.RegisterRoutes(router, api, db, s3Service, analysisRepo, processingSvc)
 
 	// Serve OpenAPI spec at /api/docs
 	router.Get("/api/docs", func(w http.ResponseWriter, r *http.Request) {

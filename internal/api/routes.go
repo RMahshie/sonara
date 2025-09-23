@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/RMahshie/sonara/internal/api/handlers"
+	"github.com/RMahshie/sonara/internal/processing"
 	"github.com/RMahshie/sonara/internal/repository"
 	"github.com/RMahshie/sonara/internal/storage"
 	"github.com/danielgtaylor/huma/v2"
@@ -12,9 +13,9 @@ import (
 )
 
 // RegisterRoutes sets up all API routes
-func RegisterRoutes(router *chi.Mux, api huma.API, db *sql.DB, s3Service storage.S3Service, analysisRepo repository.AnalysisRepository) {
+func RegisterRoutes(router *chi.Mux, api huma.API, db *sql.DB, s3Service storage.S3Service, analysisRepo repository.AnalysisRepository, processingSvc processing.ProcessingService) {
 	// Initialize handlers
-	analysisHandler := handlers.NewAnalysisHandler(analysisRepo, s3Service)
+	analysisHandler := handlers.NewAnalysisHandler(analysisRepo, s3Service, processingSvc)
 
 	// Register analysis routes
 	huma.Register(api, huma.Operation{
@@ -43,6 +44,15 @@ func RegisterRoutes(router *chi.Mux, api huma.API, db *sql.DB, s3Service storage
 		Description: "Returns the complete analysis results including frequency data",
 		Tags:        []string{"Analysis"},
 	}, analysisHandler.GetAnalysisResults)
+
+	huma.Register(api, huma.Operation{
+		OperationID: "startProcessing",
+		Method:      http.MethodPost,
+		Path:        "/api/analyses/{id}/process",
+		Summary:     "Start processing analysis",
+		Description: "Starts processing an uploaded audio file",
+		Tags:        []string{"Analysis"},
+	}, analysisHandler.StartProcessing)
 
 	huma.Register(api, huma.Operation{
 		OperationID: "addRoomInfo",

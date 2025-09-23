@@ -1,14 +1,13 @@
 import React, { useState, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import axios from 'axios'
-import { api } from '../services/api'
+import { analysisService } from '../services/analysisService'
 import ProgressBar from './ProgressBar'
 
 export const LiveRecorder: React.FC = () => {
   const [isRecording, setIsRecording] = useState(false)
   const [progress, setProgress] = useState(0)
   const [error, setError] = useState<string | null>(null)
-  const [phase, setPhase] = useState<'ready' | 'recording' | 'uploading'>('ready')
+  const [phase, setPhase] = useState<'ready' | 'recording' | 'uploading' | 'processing'>('ready')
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
@@ -48,6 +47,22 @@ export const LiveRecorder: React.FC = () => {
 
       mediaRecorder.onstop = async () => {
         const audioBlob = new Blob(chunks, { type: mimeType })
+
+        // Validate recording before upload
+        if (audioBlob.size < 1000) {
+          setError('Recording failed. Please check your microphone.')
+          setPhase('ready')
+          stream.getTracks().forEach(track => track.stop())
+          return
+        }
+
+        if (audioBlob.size > 20 * 1024 * 1024) {
+          setError('Recording too large. Please try a shorter recording.')
+          setPhase('ready')
+          stream.getTracks().forEach(track => track.stop())
+          return
+        }
+
         await uploadRecording(audioBlob, mimeType)
         stream.getTracks().forEach(track => track.stop())
       }
@@ -55,6 +70,20 @@ export const LiveRecorder: React.FC = () => {
       // Play test signal and record simultaneously
       const testSignal = new Audio('/test-signals/pink-noise-10s.wav')
       testSignal.volume = 1.0
+
+      // Add error handlers for test signal
+      testSignal.onerror = () => {
+        setError('Test signal failed to load. Please check your setup.')
+        setPhase('ready')
+        setIsRecording(false)
+        mediaRecorder.stop()
+        stream.getTracks().forEach(track => track.stop())
+        return
+      }
+
+      testSignal.oncanplaythrough = () => {
+        // Signal loaded successfully
+      }
 
       testSignal.ontimeupdate = () => {
         const currentProgress = (testSignal.currentTime / testSignal.duration) * 100
@@ -70,7 +99,17 @@ export const LiveRecorder: React.FC = () => {
       // Start recording then play test signal
       mediaRecorder.start()
       setIsRecording(true)
-      await testSignal.play()
+
+      try {
+        await testSignal.play()
+      } catch (playError) {
+        setError('Cannot play test signal. Check audio permissions.')
+        setPhase('ready')
+        setIsRecording(false)
+        mediaRecorder.stop()
+        stream.getTracks().forEach(track => track.stop())
+        return
+      }
 
     } catch (err: any) {
       setError(err.message || 'Failed to access microphone. Please check permissions.')
@@ -88,31 +127,38 @@ export const LiveRecorder: React.FC = () => {
         localStorage.setItem('sonara_session_id', sessionId)
       }
 
-      // Create analysis
-      const { data } = await api.post('/analyses', {
-        session_id: sessionId,
-        file_size: audioBlob.size,
-        mime_type: mimeType
+      // Convert blob to file for the service
+      const file = new File([audioBlob], 'recording', { type: mimeType })
+
+      // Phase 1: Create analysis and get upload URL
+      const { id: analysisId, upload_url: uploadUrl } = await analysisService.createAnalysis(sessionId, file)
+
+      // Phase 2: Upload to S3 with progress (0-30% of total progress)
+      await analysisService.uploadToS3(uploadUrl, file, (uploadProgress) => {
+        const totalProgress = Math.round(uploadProgress * 0.3) // 30% of total
+        setProgress(totalProgress)
       })
 
-      const { id: analysisId, upload_url } = data
+      // Phase 3: Start processing (switch to processing phase)
+      setPhase('processing')
+      setProgress(30) // Start processing phase at 30%
 
-      // Upload to S3
-      await axios.put(upload_url, audioBlob, {
-        headers: {
-          'Content-Type': mimeType
-        },
-        onUploadProgress: (progressEvent) => {
-          const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total!)
-          setProgress(percent)
-        }
-      })
+      await analysisService.startProcessing(analysisId)
 
-      // Navigate to analysis page
+      // Navigate to analysis page (processing will continue in background)
       navigate(`/analysis/${analysisId}`)
 
     } catch (err: any) {
-      setError('Upload failed. Please try again.')
+      // Use backend-provided error messages when available
+      if (err.response?.data?.message) {
+        setError(err.response.data.message)
+      } else if (err.response?.status === 413) {
+        setError('Recording file is too large for upload.')
+      } else if (!navigator.onLine) {
+        setError('No internet connection. Please check your network.')
+      } else {
+        setError('Upload failed. Please try again.')
+      }
       setPhase('ready')
     }
   }
@@ -176,15 +222,17 @@ export const LiveRecorder: React.FC = () => {
           </div>
         )}
 
-        {phase === 'uploading' && (
+        {(phase === 'uploading' || phase === 'processing') && (
           <div className="space-y-4">
             <div className="text-6xl text-racing-green/40">⏳</div>
             <div className="text-racing-green font-medium">
-              Analyzing your recording...
+              {phase === 'uploading' ? 'Uploading recording...' : 'Analyzing your recording...'}
             </div>
             <ProgressBar progress={progress} />
             <p className="text-sm text-racing-green/60">
-              This may take a moment
+              {phase === 'uploading'
+                ? 'Sending audio to storage...'
+                : 'Processing frequency analysis and room characteristics'}
             </p>
           </div>
         )}

@@ -3,8 +3,10 @@ package handlers
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
+	"github.com/RMahshie/sonara/internal/processing"
 	"github.com/RMahshie/sonara/internal/repository"
 	"github.com/RMahshie/sonara/internal/storage"
 	"github.com/RMahshie/sonara/pkg/models"
@@ -14,15 +16,17 @@ import (
 
 // AnalysisHandler handles analysis-related HTTP requests
 type AnalysisHandler struct {
-	repo      repository.AnalysisRepository
-	s3Service storage.S3Service
+	repo          repository.AnalysisRepository
+	s3Service     storage.S3Service
+	processingSvc processing.ProcessingService
 }
 
 // NewAnalysisHandler creates a new analysis handler
-func NewAnalysisHandler(repo repository.AnalysisRepository, s3Service storage.S3Service) *AnalysisHandler {
+func NewAnalysisHandler(repo repository.AnalysisRepository, s3Service storage.S3Service, processingSvc processing.ProcessingService) *AnalysisHandler {
 	return &AnalysisHandler{
-		repo:      repo,
-		s3Service: s3Service,
+		repo:          repo,
+		s3Service:     s3Service,
+		processingSvc: processingSvc,
 	}
 }
 
@@ -34,10 +38,23 @@ func (h *AnalysisHandler) CreateAnalysis(ctx context.Context, req *models.Create
 	// Generate S3 key for the audio file
 	audioKey := fmt.Sprintf("audio/%s.audio", analysisID)
 
+	// Validate file size explicitly
+	if req.Body.FileSize < 1000 {
+		return nil, huma.Error400BadRequest("Recording too short. Please ensure microphone is working.", nil)
+	}
+	if req.Body.FileSize > 20*1024*1024 {
+		return nil, huma.Error400BadRequest("Recording too large. Please try a shorter recording.", nil)
+	}
+
 	// Generate upload URL
 	uploadURL, err := h.s3Service.GenerateUploadURL(ctx, audioKey, req.Body.MimeType)
 	if err != nil {
-		return nil, huma.Error400BadRequest("Failed to generate upload URL", err)
+		// Check for specific error types and return user-friendly messages
+		errMsg := err.Error()
+		if strings.Contains(errMsg, "invalid content type") {
+			return nil, huma.Error400BadRequest("Recording format not supported. Please try again.", err)
+		}
+		return nil, huma.Error400BadRequest("Failed to prepare upload. Please try again.", err)
 	}
 
 	// Create analysis record in database
@@ -134,6 +151,37 @@ func (h *AnalysisHandler) GetAnalysisResults(ctx context.Context, req *models.Ge
 			RoomModes:     results.RoomModes,
 			RoomInfo:      roomInfo,
 			CreatedAt:     results.CreatedAt,
+		},
+	}, nil
+}
+
+// StartProcessing starts processing an uploaded file
+func (h *AnalysisHandler) StartProcessing(ctx context.Context, req *models.StartProcessingRequest) (*models.StartProcessingResponse, error) {
+	analysisID, err := uuid.Parse(req.ID)
+	if err != nil {
+		return nil, huma.Error400BadRequest("Invalid analysis ID", err)
+	}
+
+	// Verify analysis exists
+	_, err = h.repo.GetByID(ctx, analysisID)
+	if err != nil {
+		return nil, huma.Error404NotFound("Analysis not found", err)
+	}
+
+	// Start processing in background (don't wait for completion)
+	go func() {
+		err := h.processingSvc.ProcessAnalysis(context.Background(), analysisID)
+		if err != nil {
+			// Update status to failed
+			h.repo.UpdateError(context.Background(), analysisID, fmt.Sprintf("Processing failed: %v", err))
+		}
+	}()
+
+	return &models.StartProcessingResponse{
+		Body: struct {
+			Message string `json:"message" doc:"Confirmation message"`
+		}{
+			Message: "Processing started successfully",
 		},
 	}, nil
 }

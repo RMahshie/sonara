@@ -118,6 +118,18 @@ type AskQuestionRequest struct {
 	}
 }
 
+// StartProcessingRequest represents a request to start processing an uploaded file
+type StartProcessingRequest struct {
+	ID string `path:"id" doc:"Analysis ID"`
+}
+
+// StartProcessingResponse represents the response from starting processing
+type StartProcessingResponse struct {
+	Body struct {
+		Message string `json:"message" doc:"Confirmation message"`
+	}
+}
+
 // AskQuestionResponse represents the AI's answer to a question
 type AskQuestionResponse struct {
 	Body struct {
