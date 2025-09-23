@@ -6,9 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/google/uuid"
 	"github.com/RMahshie/sonara/internal/repository"
 	"github.com/RMahshie/sonara/pkg/models"
+	"github.com/google/uuid"
 )
 
 // PostgresAnalysisRepository implements AnalysisRepository for PostgreSQL
@@ -131,14 +131,32 @@ func (r *PostgresAnalysisRepository) GetBySessionID(ctx context.Context, session
 
 // UpdateStatus updates the status and progress of an analysis
 func (r *PostgresAnalysisRepository) UpdateStatus(ctx context.Context, id uuid.UUID, status string, progress int) error {
+	// First update status and progress
 	query := `
 		UPDATE analyses
-		SET status = $1, progress = $2, updated_at = NOW(),
-		    completed_at = CASE WHEN $1 = 'completed' THEN NOW() ELSE completed_at END
+		SET status = $1, progress = $2, updated_at = NOW()
 		WHERE id = $3`
 
 	_, err := r.db.ExecContext(ctx, query, status, progress, id)
-	return err
+	if err != nil {
+		return err
+	}
+
+	// If status is completed, set completed_at
+	if status == "completed" {
+		completedQuery := `
+			UPDATE analyses
+			SET completed_at = NOW()
+			WHERE id = $1`
+
+		_, err := r.db.ExecContext(ctx, completedQuery, id)
+		if err != nil {
+			fmt.Printf("DEBUG UpdateStatus completed_at error: %v\n", err)
+			return err
+		}
+	}
+
+	return nil
 }
 
 // UpdateError updates the error message for an analysis
@@ -166,13 +184,14 @@ func (r *PostgresAnalysisRepository) StoreResults(ctx context.Context, results *
 		return fmt.Errorf("failed to marshal room modes: %w", err)
 	}
 
-	// Convert metrics to JSON
-	var metrics []byte
-	if results.Metrics != nil {
-		metrics, err = json.Marshal(results.Metrics)
+	// Convert metrics to JSON (if present)
+	var metricsJson sql.NullString
+	if results.Metrics != nil && len(results.Metrics) > 0 {
+		metrics, err := json.Marshal(results.Metrics)
 		if err != nil {
 			return fmt.Errorf("failed to marshal metrics: %w", err)
 		}
+		metricsJson = sql.NullString{String: string(metrics), Valid: true}
 	}
 
 	query := `
@@ -185,7 +204,7 @@ func (r *PostgresAnalysisRepository) StoreResults(ctx context.Context, results *
 		string(freqData),
 		results.RT60,
 		string(roomModes),
-		string(metrics),
+		metricsJson,
 		results.CreatedAt)
 
 	return err
@@ -200,12 +219,12 @@ func (r *PostgresAnalysisRepository) GetResults(ctx context.Context, analysisID 
 
 	var results models.AnalysisResults
 	var rt60 sql.NullFloat64
-	var roomModesStr, metricsStr sql.NullString
+	var freqDataStr, roomModesStr, metricsStr sql.NullString
 
 	err := r.db.QueryRowContext(ctx, query, analysisID).Scan(
 		&results.ID,
 		&results.AnalysisID,
-		&results.FrequencyData, // This will need proper JSON unmarshaling
+		&freqDataStr,
 		&rt60,
 		&roomModesStr,
 		&metricsStr,
@@ -213,6 +232,15 @@ func (r *PostgresAnalysisRepository) GetResults(ctx context.Context, analysisID 
 
 	if err != nil {
 		return nil, err
+	}
+
+	// Unmarshal frequency data
+	if freqDataStr.Valid {
+		var frequencyData []models.FrequencyPoint
+		if err := json.Unmarshal([]byte(freqDataStr.String), &frequencyData); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal frequency data: %w", err)
+		}
+		results.FrequencyData = frequencyData
 	}
 
 	if rt60.Valid {

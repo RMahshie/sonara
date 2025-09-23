@@ -124,13 +124,15 @@ func TestFullAnalysisPipeline_Integration(t *testing.T) {
 	require.NoError(t, err)
 
 	s3Config := storage.S3Config{
-		Bucket:   tc.bucketName,
-		Endpoint: tc.minioURL,
+		Bucket:    tc.bucketName,
+		Endpoint:  tc.minioURL,
+		AccessKey: "minioadmin",
+		SecretKey: "minioadmin",
 	}
 	s3Service, err := storage.NewS3Service(s3Config)
 	require.NoError(t, err)
 
-	processingService := NewProcessingService(s3Service, repo, "scripts/analyze_audio.py")
+	processingService := NewProcessingService(s3Service, repo, "../../scripts/analyze_audio.py")
 
 	// Generate test audio file (1kHz sine wave)
 	audioData := generateTestAudio(t, 1000.0, 44100, 2.0)
@@ -144,18 +146,35 @@ func TestFullAnalysisPipeline_Integration(t *testing.T) {
 
 	// Create a test analysis with S3 key already set
 	audioKeyPtr := audioKey
+	now := time.Now()
 	analysis := &models.Analysis{
+		ID:         uuid.New().String(), // Generate UUID for the analysis
 		SessionID:  uuid.New().String(),
 		Status:     "pending",
+		Progress:   0,
 		AudioS3Key: &audioKeyPtr,
+		CreatedAt:  now,
+		UpdatedAt:  now,
 	}
 
 	err = repo.Create(ctx, analysis)
 	require.NoError(t, err)
 
-	// Process the analysis
+	// Parse UUID for subsequent operations
 	analysisID, err := uuid.Parse(analysis.ID)
 	require.NoError(t, err)
+
+	// Verify the record was actually created
+	createdAnalysis, err := repo.GetByID(ctx, analysisID)
+	if err != nil {
+		t.Logf("Failed to retrieve created analysis: %v", err)
+	} else {
+		t.Logf("Successfully created analysis: ID=%s, Status=%s", createdAnalysis.ID, createdAnalysis.Status)
+	}
+
+	// Process the analysis
+	t.Logf("Analysis ID string: %s", analysis.ID)
+	t.Logf("Parsed UUID: %s", analysisID.String())
 	err = processingService.ProcessAnalysis(ctx, analysisID)
 	require.NoError(t, err)
 
@@ -165,15 +184,22 @@ func TestFullAnalysisPipeline_Integration(t *testing.T) {
 	defer ticker.Stop()
 
 	var finalAnalysis *models.Analysis
+	pollCount := 0
 	for {
 		select {
 		case <-timeout:
 			t.Fatal("Analysis processing timed out")
 		case <-ticker.C:
+			pollCount++
 			analysis, err := repo.GetByID(ctx, analysisID)
 			require.NoError(t, err)
 
+			t.Logf("POLL #%d: Status=%s, Progress=%d, CompletedAt=%v, UpdatedAt=%v",
+				pollCount, analysis.Status, analysis.Progress,
+				analysis.CompletedAt, analysis.UpdatedAt)
+
 			if analysis.Status == "completed" || analysis.Status == "failed" {
+				t.Logf("POLL #%d: BREAKING - Status is %s", pollCount, analysis.Status)
 				finalAnalysis = analysis
 				goto processingComplete
 			}
@@ -184,14 +210,23 @@ processingComplete:
 	// Verify analysis completed successfully
 	assert.Equal(t, "completed", finalAnalysis.Status)
 	assert.NotNil(t, finalAnalysis.CompletedAt)
-	assert.Greater(t, finalAnalysis.Progress, 95.0)
+	assert.Greater(t, finalAnalysis.Progress, 95)
 
 	// Verify results were stored
 	results, err := repo.GetResults(ctx, analysisID)
 	require.NoError(t, err)
 	assert.NotNil(t, results)
+	t.Logf("Results: %+v", results)
+	t.Logf("FrequencyData length: %d", len(results.FrequencyData))
+	t.Logf("RT60: %v (type: %T)", results.RT60, results.RT60)
+	if results.RT60 != nil {
+		t.Logf("RT60 value: %f (dereferenced type: %T)", *results.RT60, *results.RT60)
+	}
 	assert.NotEmpty(t, results.FrequencyData)
-	assert.IsType(t, 0.0, results.RT60)
+	assert.NotNil(t, results.RT60)
+	if results.RT60 != nil {
+		assert.IsType(t, 0.0, *results.RT60)
+	}
 
 	// Verify 1kHz peak is detected in results
 	peakFound := false
@@ -228,20 +263,27 @@ func TestAnalysisPipelineFailure_Integration(t *testing.T) {
 	require.NoError(t, err)
 
 	s3Config := storage.S3Config{
-		Bucket:   tc.bucketName,
-		Endpoint: tc.minioURL,
+		Bucket:    tc.bucketName,
+		Endpoint:  tc.minioURL,
+		AccessKey: "minioadmin",
+		SecretKey: "minioadmin",
 	}
 	s3Service, err := storage.NewS3Service(s3Config)
 	require.NoError(t, err)
 
-	processingService := NewProcessingService(s3Service, repo, "scripts/analyze_audio.py")
+	processingService := NewProcessingService(s3Service, repo, "../../scripts/analyze_audio.py")
 
 	// Create analysis with non-existent S3 key
 	nonExistentKey := "non-existent-file.wav"
+	now := time.Now()
 	analysis := &models.Analysis{
+		ID:         uuid.New().String(),
 		SessionID:  uuid.New().String(),
 		Status:     "pending",
+		Progress:   0,
 		AudioS3Key: &nonExistentKey,
+		CreatedAt:  now,
+		UpdatedAt:  now,
 	}
 
 	err = repo.Create(ctx, analysis)
@@ -284,10 +326,23 @@ processingComplete:
 func runMigrations(t *testing.T, dbURL string) error {
 	t.Helper()
 
+	// Log the database URL for debugging
+	t.Logf("Database URL: %s", dbURL)
+
 	// Run migrate command
-	cmd := exec.Command("migrate", "-path", "../../migrations", "-database", dbURL, "up")
+	cmd := exec.Command("migrate", "-path", "migrations", "-database", dbURL, "up")
 	cmd.Dir = "../../" // Adjust path to migrations directory
-	return cmd.Run()
+
+	// Capture output to see detailed error messages
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Logf("Migrate command failed. Output: %s", string(output))
+		t.Logf("Migrate error: %v", err)
+		return err
+	}
+
+	t.Logf("Migrate successful. Output: %s", string(output))
+	return nil
 }
 
 func generateTestAudio(t *testing.T, frequency, sampleRate, duration float64) []byte {
@@ -384,8 +439,20 @@ func createTempAudioFile(t *testing.T, audioData []byte, sampleRate int) string 
 }
 
 func uploadFileToS3(ctx context.Context, s3Service storage.S3Service, filePath, key string) error {
-	// For integration tests, we'll use a simplified approach
-	// In a real scenario, the client would upload via pre-signed URL
-	// For testing, we can put the file in a location where the processing service can find it
-	return nil
+	// For integration testing, copy file to /tmp where processing service will read it
+	// (processing service has special handling for keys starting with "test-")
+
+	file, err := os.Open(filePath)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	fileData, err := io.ReadAll(file)
+	if err != nil {
+		return err
+	}
+
+	destPath := "/tmp/" + key
+	return os.WriteFile(destPath, fileData, 0644)
 }

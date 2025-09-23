@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -43,30 +44,37 @@ func NewS3Service(cfg S3Config) (S3Service, error) {
 	var awsCfg aws.Config
 	var err error
 
+	var client *s3.Client
+
 	if cfg.Endpoint != "" {
 		// MinIO configuration
 		awsCfg, err = config.LoadDefaultConfig(context.Background(),
 			config.WithRegion("us-east-1"), // MinIO doesn't care about region
-			config.WithEndpointResolverWithOptions(aws.EndpointResolverWithOptionsFunc(
-				func(service, region string, options ...interface{}) (aws.Endpoint, error) {
-					return aws.Endpoint{
-						URL:           cfg.Endpoint,
-						SigningRegion: "us-east-1",
-					}, nil
-				})),
 		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load AWS config: %w", err)
+		}
+
+		endpoint := cfg.Endpoint
+		if !strings.HasPrefix(endpoint, "http://") && !strings.HasPrefix(endpoint, "https://") {
+			endpoint = "http://" + endpoint
+		}
+
+		client = s3.NewFromConfig(awsCfg, func(o *s3.Options) {
+			o.BaseEndpoint = &endpoint
+			o.UsePathStyle = true // MinIO requires path-style URLs
+		})
 	} else {
 		// AWS S3 configuration
 		awsCfg, err = config.LoadDefaultConfig(context.Background(),
 			config.WithRegion(cfg.Region),
 		)
-	}
+		if err != nil {
+			return nil, fmt.Errorf("failed to load AWS config: %w", err)
+		}
 
-	if err != nil {
-		return nil, fmt.Errorf("failed to load AWS config: %w", err)
+		client = s3.NewFromConfig(awsCfg)
 	}
-
-	client := s3.NewFromConfig(awsCfg)
 
 	return &s3Service{
 		client:    client,

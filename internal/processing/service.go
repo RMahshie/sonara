@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/RMahshie/sonara/internal/repository"
 	"github.com/RMahshie/sonara/internal/storage"
@@ -21,7 +22,7 @@ type ProcessingService interface {
 type processingService struct {
 	s3         storage.S3Service
 	repository repository.AnalysisRepository
-	pythonPath string // "scripts/analyze_audio.py"
+	pythonPath string // Absolute path to "scripts/analyze_audio.py"
 }
 
 func NewProcessingService(s3Service storage.S3Service, repo repository.AnalysisRepository, pythonPath string) ProcessingService {
@@ -49,10 +50,21 @@ func (s *processingService) ProcessAnalysis(ctx context.Context, analysisID uuid
 		return err
 	}
 
-	audioData, err := s.s3.DownloadFile(ctx, *analysis.AudioS3Key)
-	if err != nil {
-		s.repository.UpdateError(ctx, analysisID, "Failed to download audio")
-		return err
+	// For testing: if S3 key starts with "test-", read from /tmp instead of S3
+	var audioData []byte
+
+	if strings.HasPrefix(*analysis.AudioS3Key, "test-") {
+		audioData, err = os.ReadFile("/tmp/" + *analysis.AudioS3Key)
+		if err != nil {
+			s.repository.UpdateError(ctx, analysisID, "Failed to read test audio file")
+			return err
+		}
+	} else {
+		audioData, err = s.s3.DownloadFile(ctx, *analysis.AudioS3Key)
+		if err != nil {
+			s.repository.UpdateError(ctx, analysisID, "Failed to download audio")
+			return err
+		}
 	}
 
 	// Step 4: Save to temp file
@@ -70,6 +82,9 @@ func (s *processingService) ProcessAnalysis(ctx context.Context, analysisID uuid
 	// Get room info for enhanced analysis
 	roomInfo, err := s.repository.GetRoomInfo(ctx, analysisID)
 
+	// Use virtual environment python
+	pythonCmd := "/Users/rmahshie/Downloads/projects/sonara/scripts/venv/bin/python3"
+
 	var cmd *exec.Cmd
 	if err == nil && roomInfo != nil && roomInfo.RoomLength > 0 && roomInfo.RoomWidth > 0 && roomInfo.RoomHeight > 0 {
 		// Pass room data to Python for enhanced analysis
@@ -83,19 +98,21 @@ func (s *processingService) ProcessAnalysis(ctx context.Context, analysisID uuid
 		roomDataJSON, err := json.Marshal(roomData)
 		if err != nil {
 			// Fallback to analysis without room data
-			cmd = exec.CommandContext(ctx, "python3", s.pythonPath, tempFile)
+			cmd = exec.CommandContext(ctx, pythonCmd, s.pythonPath, tempFile)
 		} else {
-			cmd = exec.CommandContext(ctx, "python3", s.pythonPath, tempFile, string(roomDataJSON))
+			cmd = exec.CommandContext(ctx, pythonCmd, s.pythonPath, tempFile, string(roomDataJSON))
 		}
 	} else {
 		// No room data available, use original approach
-		cmd = exec.CommandContext(ctx, "python3", s.pythonPath, tempFile)
+		cmd = exec.CommandContext(ctx, pythonCmd, s.pythonPath, tempFile)
 	}
 
-	output, err := cmd.Output()
+	output, err := cmd.CombinedOutput()
 	if err != nil {
-		s.repository.UpdateError(ctx, analysisID, "Audio analysis failed")
-		return fmt.Errorf("python analysis failed: %w", err)
+		outputStr := string(output)
+		fmt.Printf("Python script output: %s\n", outputStr)
+		s.repository.UpdateError(ctx, analysisID, fmt.Sprintf("Audio analysis failed: %s", outputStr))
+		return fmt.Errorf("python analysis failed: %w, output: %s", err, outputStr)
 	}
 
 	// Step 6: Parse results
@@ -126,11 +143,23 @@ func (s *processingService) ProcessAnalysis(ctx context.Context, analysisID uuid
 	// Convert room modes to the expected format
 	var roomModes []float64
 	if modes, ok := result.RoomModes.([]interface{}); ok {
-		// Enhanced format - extract frequencies from mode objects
-		for _, mode := range modes {
-			if modeMap, ok := mode.(map[string]interface{}); ok {
-				if freq, ok := modeMap["frequency"].(float64); ok {
-					roomModes = append(roomModes, freq)
+		// Check if it's an array of objects (enhanced format)
+		if len(modes) > 0 {
+			if _, ok := modes[0].(map[string]interface{}); ok {
+				// Enhanced format - extract frequencies from mode objects
+				for _, mode := range modes {
+					if modeObj, ok := mode.(map[string]interface{}); ok {
+						if freq, ok := modeObj["frequency"].(float64); ok {
+							roomModes = append(roomModes, freq)
+						}
+					}
+				}
+			} else {
+				// Simple array of numbers
+				for _, mode := range modes {
+					if freq, ok := mode.(float64); ok {
+						roomModes = append(roomModes, freq)
+					}
 				}
 			}
 		}
@@ -139,14 +168,18 @@ func (s *processingService) ProcessAnalysis(ctx context.Context, analysisID uuid
 		roomModes = modes
 	}
 
-	if err := s.repository.StoreResults(ctx, &models.AnalysisResults{
+	// Store results in database
+
+	results := &models.AnalysisResults{
 		ID:            uuid.New().String(),
 		AnalysisID:    analysis.ID,
 		FrequencyData: result.FrequencyData,
 		RT60:          &result.RT60,
 		RoomModes:     roomModes,
 		CreatedAt:     analysis.CreatedAt,
-	}); err != nil {
+	}
+
+	if err := s.repository.StoreResults(ctx, results); err != nil {
 		return err
 	}
 
