@@ -6,6 +6,18 @@
 
 ## ✅ Recently Completed
 
+### S3 Credentials Authentication Fix ✅ **COMPLETED**
+- **MinIO Credential Handling**: ✅ Fixed S3 service to properly use AccessKey/SecretKey for MinIO connections
+- **Static Credentials Provider**: ✅ Added explicit credential configuration for MinIO endpoints
+- **Bucket Creation**: ✅ Implemented proper MinIO bucket creation in integration tests
+- **Error Handling Update**: ✅ Modified processing service to handle download failures gracefully
+- **Test Infrastructure**: ✅ Fixed test setup to create buckets and handle authentication correctly
+
+**Root Cause Identified:**
+- S3 service accepted but ignored credentials for MinIO connections
+- AWS SDK fell back to default credential chain causing authentication errors
+- Integration test failure test couldn't reach S3 download code due to auth issues
+
 ### Integration Test Race Condition Fix ✅ **COMPLETED**
 - **PostgreSQL Parameter Binding Issue**: ✅ Fixed `pq: inconsistent types deduced for parameter $1` error
 - **UpdateStatus Method**: ✅ Separated status/progress update from completed_at timestamp setting

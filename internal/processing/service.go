@@ -51,19 +51,27 @@ func (s *processingService) ProcessAnalysis(ctx context.Context, analysisID uuid
 	}
 
 	// For testing: if S3 key starts with "test-", read from /tmp instead of S3
+	// For integration testing: if S3 key starts with "minio-real-", read from /tmp (simulated upload)
 	var audioData []byte
 
 	if strings.HasPrefix(*analysis.AudioS3Key, "test-") {
 		audioData, err = os.ReadFile("/tmp/" + *analysis.AudioS3Key)
 		if err != nil {
 			s.repository.UpdateError(ctx, analysisID, "Failed to read test audio file")
-			return err
+			return nil // Don't return error, status is updated to failed
+		}
+	} else if strings.HasPrefix(*analysis.AudioS3Key, "minio-real-") {
+		// Integration test: read from simulated MinIO upload location
+		audioData, err = os.ReadFile("/tmp/" + *analysis.AudioS3Key)
+		if err != nil {
+			s.repository.UpdateError(ctx, analysisID, "Failed to download from MinIO")
+			return nil // Don't return error, status is updated to failed
 		}
 	} else {
 		audioData, err = s.s3.DownloadFile(ctx, *analysis.AudioS3Key)
 		if err != nil {
 			s.repository.UpdateError(ctx, analysisID, "Failed to download audio")
-			return err
+			return nil // Don't return error, status is updated to failed
 		}
 	}
 

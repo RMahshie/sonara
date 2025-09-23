@@ -8,6 +8,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
@@ -47,12 +48,19 @@ func NewS3Service(cfg S3Config) (S3Service, error) {
 	var client *s3.Client
 
 	if cfg.Endpoint != "" {
-		// MinIO configuration
+		// MinIO configuration - requires explicit credentials
+		if cfg.AccessKey == "" || cfg.SecretKey == "" {
+			return nil, fmt.Errorf("AccessKey and SecretKey are required for MinIO endpoint")
+		}
+
+		// Use static credentials provider for MinIO
+		staticCreds := credentials.NewStaticCredentialsProvider(cfg.AccessKey, cfg.SecretKey, "")
 		awsCfg, err = config.LoadDefaultConfig(context.Background(),
 			config.WithRegion("us-east-1"), // MinIO doesn't care about region
+			config.WithCredentialsProvider(staticCreds),
 		)
 		if err != nil {
-			return nil, fmt.Errorf("failed to load AWS config: %w", err)
+			return nil, fmt.Errorf("failed to load AWS config for MinIO: %w", err)
 		}
 
 		endpoint := cfg.Endpoint
@@ -65,12 +73,12 @@ func NewS3Service(cfg S3Config) (S3Service, error) {
 			o.UsePathStyle = true // MinIO requires path-style URLs
 		})
 	} else {
-		// AWS S3 configuration
+		// AWS S3 configuration - use default credential chain
 		awsCfg, err = config.LoadDefaultConfig(context.Background(),
 			config.WithRegion(cfg.Region),
 		)
 		if err != nil {
-			return nil, fmt.Errorf("failed to load AWS config: %w", err)
+			return nil, fmt.Errorf("failed to load AWS config for S3: %w", err)
 		}
 
 		client = s3.NewFromConfig(awsCfg)

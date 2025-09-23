@@ -4,17 +4,24 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"io"
 	"math"
+	"net/http"
 	"os"
 	"os/exec"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/RMahshie/sonara/internal/repository/postgres"
 	"github.com/RMahshie/sonara/internal/storage"
 	"github.com/RMahshie/sonara/pkg/models"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/google/uuid"
 	_ "github.com/lib/pq"
 	"github.com/stretchr/testify/assert"
@@ -95,8 +102,39 @@ func (tc *TestContainer) CleanupIntegrationTest(t *testing.T) {
 
 // createMinioBucket creates a bucket in MinIO for testing
 func createMinioBucket(ctx context.Context, minioURL, bucketName string) error {
-	// For integration tests, we'll let the S3 service handle bucket creation
-	// when it first tries to upload. This simplifies the setup.
+	// Create MinIO client to create the bucket
+	cfg := aws.Config{
+		Region:      "us-east-1",
+		Credentials: credentials.NewStaticCredentialsProvider("minioadmin", "minioadmin", ""),
+	}
+
+	// Parse the MinIO URL
+	endpoint := minioURL
+	if !strings.HasPrefix(endpoint, "http://") && !strings.HasPrefix(endpoint, "https://") {
+		endpoint = "http://" + endpoint
+	}
+
+	client := s3.NewFromConfig(cfg, func(o *s3.Options) {
+		o.BaseEndpoint = &endpoint
+		o.UsePathStyle = true // MinIO requires path-style URLs
+	})
+
+	// Create the bucket
+	_, err := client.CreateBucket(ctx, &s3.CreateBucketInput{
+		Bucket: aws.String(bucketName),
+	})
+
+	// Ignore "BucketAlreadyExists" error
+	if err != nil {
+		var bae *types.BucketAlreadyExists
+		if !errors.As(err, &bae) {
+			var bao *types.BucketAlreadyOwnedByYou
+			if !errors.As(err, &bao) {
+				return fmt.Errorf("failed to create bucket: %w", err)
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -237,6 +275,279 @@ processingComplete:
 		}
 	}
 	assert.True(t, peakFound, "1kHz peak not found in analysis results")
+}
+
+// TestMinIOFileOperations_Integration tests actual MinIO upload/download operations
+func TestMinIOFileOperations_Integration(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping MinIO integration test in short mode")
+	}
+
+	tc := SetupIntegrationTest(t)
+	defer tc.CleanupIntegrationTest(t)
+
+	ctx := context.Background()
+
+	// Setup S3 service with MinIO config (no bypass)
+	s3Config := storage.S3Config{
+		Bucket:    tc.bucketName,
+		Endpoint:  tc.minioURL,
+		AccessKey: "minioadmin",
+		SecretKey: "minioadmin",
+	}
+	s3Service, err := storage.NewS3Service(s3Config)
+	require.NoError(t, err)
+
+	// Generate unique test file
+	testContent := fmt.Sprintf("MinIO integration test data - %s - %d", uuid.New().String(), time.Now().Unix())
+	testData := []byte(testContent)
+	testKey := fmt.Sprintf("minio-integration-test-%s.txt", uuid.New().String()[:8])
+
+	t.Logf("Test file key: %s", testKey)
+	t.Logf("Test file size: %d bytes", len(testData))
+
+	// Test 1: Upload file to MinIO
+	t.Log("Step 1: Uploading test file to MinIO...")
+	err = uploadTestDataToMinIO(ctx, s3Service, testData, testKey)
+	require.NoError(t, err, "Failed to upload test file to MinIO")
+	t.Log("✅ Upload successful")
+
+	// Test 2: Download file from MinIO
+	t.Log("Step 2: Downloading test file from MinIO...")
+	downloadedData, err := s3Service.DownloadFile(ctx, testKey)
+	require.NoError(t, err, "Failed to download test file from MinIO")
+	t.Log("✅ Download successful")
+
+	// Test 3: Verify content integrity
+	t.Log("Step 3: Verifying content integrity...")
+	assert.Equal(t, testData, downloadedData, "Downloaded content does not match original")
+	assert.Equal(t, len(testData), len(downloadedData), "Downloaded file size does not match original")
+	assert.Equal(t, testContent, string(downloadedData), "Downloaded content string does not match original")
+	t.Log("✅ Content integrity verified")
+
+	// Test 4: Test error case - download non-existent file
+	t.Log("Step 4: Testing error case (non-existent file)...")
+	nonExistentKey := fmt.Sprintf("non-existent-file-%s.txt", uuid.New().String()[:8])
+	_, err = s3Service.DownloadFile(ctx, nonExistentKey)
+	assert.Error(t, err, "Expected error when downloading non-existent file")
+	t.Log("✅ Error case handled correctly")
+
+	// Test 5: Cleanup - delete test file
+	t.Log("Step 5: Cleaning up test file...")
+	err = s3Service.DeleteFile(ctx, testKey)
+	assert.NoError(t, err, "Failed to delete test file from MinIO")
+	t.Log("✅ Cleanup successful")
+
+	// Test 6: Verify deletion - try to download deleted file
+	t.Log("Step 6: Verifying deletion...")
+	_, err = s3Service.DownloadFile(ctx, testKey)
+	assert.Error(t, err, "Expected error when downloading deleted file")
+	t.Log("✅ Deletion verified")
+
+	t.Log("🎉 All MinIO integration tests passed!")
+}
+
+// uploadTestDataToMinIO uploads test data directly to MinIO for integration testing
+func uploadTestDataToMinIO(ctx context.Context, s3Service storage.S3Service, data []byte, key string) error {
+	// Use the S3 service's upload URL generation to simulate real upload flow
+	// Generate pre-signed upload URL (use audio/wav content type since that's accepted)
+	uploadURL, err := s3Service.GenerateUploadURL(ctx, key, "audio/wav")
+	if err != nil {
+		return fmt.Errorf("failed to generate upload URL: %w", err)
+	}
+
+	// Upload data using HTTP PUT to the pre-signed URL
+	req, err := http.NewRequestWithContext(ctx, "PUT", uploadURL, bytes.NewReader(data))
+	if err != nil {
+		return fmt.Errorf("failed to create upload request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "audio/wav")
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to upload to MinIO: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("MinIO upload failed with status: %d", resp.StatusCode)
+	}
+
+	return nil
+}
+
+// TestMinIOEndToEndAnalysis_Integration tests complete analysis pipeline with real MinIO operations
+func TestMinIOEndToEndAnalysis_Integration(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping MinIO end-to-end test in short mode")
+	}
+
+	tc := SetupIntegrationTest(t)
+	defer tc.CleanupIntegrationTest(t)
+
+	ctx := context.Background()
+
+	// Set up dependencies
+	db, err := sql.Open("postgres", tc.dbURL)
+	require.NoError(t, err)
+	defer db.Close()
+
+	repo := postgres.NewPostgresAnalysisRepository(db)
+	require.NoError(t, err)
+
+	// Run migrations
+	err = runMigrations(t, tc.dbURL)
+	require.NoError(t, err)
+
+	s3Config := storage.S3Config{
+		Bucket:    tc.bucketName,
+		Endpoint:  tc.minioURL,
+		AccessKey: "minioadmin",
+		SecretKey: "minioadmin",
+	}
+	s3Service, err := storage.NewS3Service(s3Config)
+	require.NoError(t, err)
+
+	processingService := NewProcessingService(s3Service, repo, "../../scripts/analyze_audio.py")
+
+	// Generate test audio file (1kHz sine wave) - same as other tests
+	audioData := generateTestAudio(t, 1000.0, 44100, 2.0)
+	audioFile := createTempAudioFile(t, audioData, 44100)
+	defer os.Remove(audioFile)
+
+	// Upload audio file to MinIO using real operations (not /tmp bypass)
+	audioKey := fmt.Sprintf("e2e-audio-%s.wav", uuid.New().String()[:8])
+	t.Logf("Audio file key: %s", audioKey)
+
+	// Upload using pre-signed URL (real MinIO operation)
+	err = uploadAudioToMinIO(ctx, s3Service, audioFile, audioKey)
+	require.NoError(t, err, "Failed to upload audio file to MinIO")
+	t.Log("✅ Audio file uploaded to MinIO")
+
+	// Create a test analysis with real MinIO key (no "test-" prefix = actual download)
+	nonExistentKey := audioKey // Use the real key
+	now := time.Now()
+	analysis := &models.Analysis{
+		ID:         uuid.New().String(),
+		SessionID:  uuid.New().String(),
+		Status:     "pending",
+		Progress:   0,
+		AudioS3Key: &nonExistentKey, // Real MinIO key - will trigger actual download
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}
+
+	err = repo.Create(ctx, analysis)
+	require.NoError(t, err)
+
+	// Parse UUID for subsequent operations
+	analysisID, err := uuid.Parse(analysis.ID)
+	require.NoError(t, err)
+
+	t.Logf("Created analysis with ID: %s", analysisID)
+
+	// Process the analysis (will download from MinIO and run full pipeline)
+	err = processingService.ProcessAnalysis(ctx, analysisID)
+	require.NoError(t, err, "ProcessAnalysis should succeed even with MinIO operations")
+
+	// Wait for processing to complete (with timeout)
+	timeout := time.After(45 * time.Second) // Longer timeout for full analysis
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	var finalAnalysis *models.Analysis
+	pollCount := 0
+	for {
+		select {
+		case <-timeout:
+			t.Fatal("Analysis processing timed out")
+		case <-ticker.C:
+			pollCount++
+			analysis, err := repo.GetByID(ctx, analysisID)
+			require.NoError(t, err)
+
+			t.Logf("POLL #%d: Status=%s, Progress=%d", pollCount, analysis.Status, analysis.Progress)
+
+			if analysis.Status == "completed" || analysis.Status == "failed" {
+				t.Logf("Analysis finished with status: %s", analysis.Status)
+				finalAnalysis = analysis
+				goto analysisComplete
+			}
+		}
+	}
+
+analysisComplete:
+	// Verify analysis completed successfully
+	assert.Equal(t, "completed", finalAnalysis.Status)
+	assert.NotNil(t, finalAnalysis.CompletedAt)
+	assert.Greater(t, finalAnalysis.Progress, 95)
+
+	// Verify results were stored
+	results, err := repo.GetResults(ctx, analysisID)
+	require.NoError(t, err)
+	assert.NotNil(t, results)
+	t.Logf("Results: FrequencyData length=%d, RT60=%v", len(results.FrequencyData), results.RT60)
+
+	// Verify frequency data
+	assert.NotEmpty(t, results.FrequencyData)
+	assert.NotNil(t, results.RT60)
+	if results.RT60 != nil {
+		assert.IsType(t, 0.0, *results.RT60)
+	}
+
+	// Verify 1kHz peak is detected in results
+	peakFound := false
+	for _, point := range results.FrequencyData {
+		if point.Frequency >= 990 && point.Frequency <= 1010 {
+			peakFound = true
+			break
+		}
+	}
+	assert.True(t, peakFound, "1kHz peak not found in analysis results from MinIO")
+
+	// Cleanup: Delete the test file from MinIO
+	err = s3Service.DeleteFile(ctx, audioKey)
+	assert.NoError(t, err, "Failed to cleanup test file from MinIO")
+
+	t.Log("🎉 MinIO end-to-end analysis test completed successfully!")
+}
+
+// uploadAudioToMinIO uploads an audio file to MinIO using pre-signed URL
+func uploadAudioToMinIO(ctx context.Context, s3Service storage.S3Service, filePath, key string) error {
+	// Read the audio file
+	fileData, err := os.ReadFile(filePath)
+	if err != nil {
+		return fmt.Errorf("failed to read audio file: %w", err)
+	}
+
+	// Generate pre-signed upload URL
+	uploadURL, err := s3Service.GenerateUploadURL(ctx, key, "audio/wav")
+	if err != nil {
+		return fmt.Errorf("failed to generate upload URL: %w", err)
+	}
+
+	// Upload using HTTP PUT
+	req, err := http.NewRequestWithContext(ctx, "PUT", uploadURL, bytes.NewReader(fileData))
+	if err != nil {
+		return fmt.Errorf("failed to create upload request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "audio/wav")
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to upload to MinIO: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("MinIO upload failed with status: %d", resp.StatusCode)
+	}
+
+	return nil
 }
 
 // TestAnalysisPipelineFailure_Integration tests error handling in the pipeline
