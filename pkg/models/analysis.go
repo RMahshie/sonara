@@ -19,6 +19,7 @@ type CreateAnalysisRequest struct {
 		SessionID string `json:"session_id" minLength:"10" maxLength:"50" required:"true" doc:"Client session identifier"`
 		FileSize  int64  `json:"file_size" minimum:"1000" maximum:"20971520" required:"true" doc:"Audio file size in bytes"`
 		MimeType  string `json:"mime_type" enum:"audio/wav,audio/mpeg,audio/flac,audio/webm,audio/ogg" required:"true" doc:"Audio file MIME type"`
+		SignalID  string `json:"signal_id" required:"true" doc:"Test signal identifier (e.g., 'sine_sweep_20_20k')"`
 	}
 }
 
@@ -142,6 +143,7 @@ type AskQuestionResponse struct {
 type Analysis struct {
 	ID          string     `json:"id"`
 	SessionID   string     `json:"session_id"`
+	SignalID    string     `json:"signal_id"` // Test signal identifier
 	Status      string     `json:"status"`
 	Progress    int        `json:"progress"`
 	AudioS3Key  *string    `json:"audio_s3_key,omitempty"`

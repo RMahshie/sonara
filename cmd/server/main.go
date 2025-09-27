@@ -32,12 +32,15 @@ func main() {
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
 
 	// Load configuration
+	log.Info().Msg("Loading configuration...")
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to load configuration")
 	}
+	log.Info().Str("port", cfg.Server.Port).Str("env", cfg.Server.Env).Msg("Configuration loaded successfully")
 
 	// Initialize database connection
+	log.Info().Msg("Connecting to database...")
 	db, err := sql.Open("postgres", cfg.Database.URL)
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to connect to database")
@@ -45,14 +48,17 @@ func main() {
 	defer db.Close()
 
 	// Test database connection
+	log.Info().Msg("Testing database connection...")
 	if err := db.Ping(); err != nil {
 		log.Fatal().Err(err).Msg("Failed to ping database")
 	}
+	log.Info().Msg("Database connection established successfully")
 
 	// Initialize repositories
 	analysisRepo := postgres.NewPostgresAnalysisRepository(db)
 
 	// Initialize S3 service
+	log.Info().Str("bucket", cfg.AWS.S3Bucket).Str("endpoint", cfg.AWS.S3Endpoint).Msg("Initializing S3 service...")
 	s3Config := storage.S3Config{
 		Bucket:    cfg.AWS.S3Bucket,
 		Endpoint:  cfg.AWS.S3Endpoint,
@@ -64,6 +70,7 @@ func main() {
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to initialize S3 service")
 	}
+	log.Info().Msg("S3 service initialized successfully")
 
 	// Initialize processing service
 	processingSvc := processing.NewProcessingService(s3Service, analysisRepo, "scripts/analyze_audio.py")
@@ -108,7 +115,9 @@ func main() {
 	})
 
 	// Register analysis routes
+	log.Info().Msg("Registering API routes...")
 	apiPkg.RegisterRoutes(router, api, db, s3Service, analysisRepo, processingSvc)
+	log.Info().Msg("API routes registered successfully")
 
 	// Serve OpenAPI spec at /api/docs
 	router.Get("/api/docs", func(w http.ResponseWriter, r *http.Request) {

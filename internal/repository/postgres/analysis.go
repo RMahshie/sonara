@@ -5,10 +5,12 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/RMahshie/sonara/internal/repository"
 	"github.com/RMahshie/sonara/pkg/models"
 	"github.com/google/uuid"
+	"github.com/rs/zerolog/log"
 )
 
 // PostgresAnalysisRepository implements AnalysisRepository for PostgreSQL
@@ -23,26 +25,40 @@ func NewPostgresAnalysisRepository(db *sql.DB) repository.AnalysisRepository {
 
 // Create inserts a new analysis record
 func (r *PostgresAnalysisRepository) Create(ctx context.Context, analysis *models.Analysis) error {
+	log.Info().Str("analysisID", analysis.ID).Str("sessionID", analysis.SessionID).Msg("Creating analysis record in database")
+	startTime := time.Now()
+
 	query := `
-		INSERT INTO analyses (id, session_id, status, progress, audio_s3_key, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)`
+		INSERT INTO analyses (id, session_id, signal_id, status, progress, audio_s3_key, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`
 
 	_, err := r.db.ExecContext(ctx, query,
 		analysis.ID,
 		analysis.SessionID,
+		analysis.SignalID, // Added signal_id
 		analysis.Status,
 		analysis.Progress,
 		analysis.AudioS3Key,
 		analysis.CreatedAt,
 		analysis.UpdatedAt)
 
+	executionTime := time.Since(startTime)
+	if err != nil {
+		log.Error().Str("analysisID", analysis.ID).Dur("executionTime", executionTime).Err(err).Msg("Failed to create analysis record")
+		return err
+	}
+
+	log.Info().Str("analysisID", analysis.ID).Dur("executionTime", executionTime).Msg("Analysis record created successfully")
 	return err
 }
 
 // GetByID retrieves an analysis by ID
 func (r *PostgresAnalysisRepository) GetByID(ctx context.Context, id uuid.UUID) (*models.Analysis, error) {
+	log.Info().Str("analysisID", id.String()).Msg("Retrieving analysis record from database")
+	startTime := time.Now()
+
 	query := `
-		SELECT id, session_id, status, progress, audio_s3_key, error_message, created_at, updated_at, completed_at
+		SELECT id, session_id, signal_id, status, progress, audio_s3_key, error_message, created_at, updated_at, completed_at
 		FROM analyses
 		WHERE id = $1`
 
@@ -53,6 +69,7 @@ func (r *PostgresAnalysisRepository) GetByID(ctx context.Context, id uuid.UUID) 
 	err := r.db.QueryRowContext(ctx, query, id).Scan(
 		&analysis.ID,
 		&analysis.SessionID,
+		&analysis.SignalID, // Added signal_id
 		&analysis.Status,
 		&analysis.Progress,
 		&audioS3Key,
@@ -61,7 +78,9 @@ func (r *PostgresAnalysisRepository) GetByID(ctx context.Context, id uuid.UUID) 
 		&analysis.UpdatedAt,
 		&completedAt)
 
+	executionTime := time.Since(startTime)
 	if err != nil {
+		log.Error().Str("analysisID", id.String()).Dur("executionTime", executionTime).Err(err).Msg("Failed to retrieve analysis record")
 		return nil, err
 	}
 
@@ -75,6 +94,7 @@ func (r *PostgresAnalysisRepository) GetByID(ctx context.Context, id uuid.UUID) 
 		analysis.CompletedAt = &completedAt.Time
 	}
 
+	log.Info().Str("analysisID", id.String()).Str("status", analysis.Status).Int("progress", analysis.Progress).Dur("executionTime", executionTime).Msg("Analysis record retrieved successfully")
 	return &analysis, nil
 }
 
@@ -131,6 +151,9 @@ func (r *PostgresAnalysisRepository) GetBySessionID(ctx context.Context, session
 
 // UpdateStatus updates the status and progress of an analysis
 func (r *PostgresAnalysisRepository) UpdateStatus(ctx context.Context, id uuid.UUID, status string, progress int) error {
+	log.Info().Str("analysisID", id.String()).Str("status", status).Int("progress", progress).Msg("Updating analysis status in database")
+	startTime := time.Now()
+
 	// First update status and progress
 	query := `
 		UPDATE analyses
@@ -138,12 +161,15 @@ func (r *PostgresAnalysisRepository) UpdateStatus(ctx context.Context, id uuid.U
 		WHERE id = $3`
 
 	_, err := r.db.ExecContext(ctx, query, status, progress, id)
+	executionTime := time.Since(startTime)
 	if err != nil {
+		log.Error().Str("analysisID", id.String()).Dur("executionTime", executionTime).Err(err).Msg("Failed to update analysis status")
 		return err
 	}
 
 	// If status is completed, set completed_at
 	if status == "completed" {
+		log.Info().Str("analysisID", id.String()).Msg("Setting completion timestamp")
 		completedQuery := `
 			UPDATE analyses
 			SET completed_at = NOW()
@@ -151,9 +177,12 @@ func (r *PostgresAnalysisRepository) UpdateStatus(ctx context.Context, id uuid.U
 
 		_, err := r.db.ExecContext(ctx, completedQuery, id)
 		if err != nil {
-			fmt.Printf("DEBUG UpdateStatus completed_at error: %v\n", err)
+			log.Error().Str("analysisID", id.String()).Err(err).Msg("Failed to set completion timestamp")
 			return err
 		}
+		log.Info().Str("analysisID", id.String()).Dur("executionTime", time.Since(startTime)).Msg("Analysis status updated successfully")
+	} else {
+		log.Info().Str("analysisID", id.String()).Dur("executionTime", executionTime).Msg("Analysis status updated successfully")
 	}
 
 	return nil
@@ -172,15 +201,20 @@ func (r *PostgresAnalysisRepository) UpdateError(ctx context.Context, id uuid.UU
 
 // StoreResults stores analysis results
 func (r *PostgresAnalysisRepository) StoreResults(ctx context.Context, results *models.AnalysisResults) error {
+	log.Info().Str("analysisID", results.AnalysisID).Str("resultsID", results.ID).Int("frequencyPoints", len(results.FrequencyData)).Msg("Storing analysis results in database")
+	startTime := time.Now()
+
 	// Convert frequency data to JSON
 	freqData, err := json.Marshal(results.FrequencyData)
 	if err != nil {
+		log.Error().Str("analysisID", results.AnalysisID).Err(err).Msg("Failed to marshal frequency data")
 		return fmt.Errorf("failed to marshal frequency data: %w", err)
 	}
 
 	// Convert room modes to JSON
 	roomModes, err := json.Marshal(results.RoomModes)
 	if err != nil {
+		log.Error().Str("analysisID", results.AnalysisID).Err(err).Msg("Failed to marshal room modes")
 		return fmt.Errorf("failed to marshal room modes: %w", err)
 	}
 
@@ -189,6 +223,7 @@ func (r *PostgresAnalysisRepository) StoreResults(ctx context.Context, results *
 	if results.Metrics != nil && len(results.Metrics) > 0 {
 		metrics, err := json.Marshal(results.Metrics)
 		if err != nil {
+			log.Error().Str("analysisID", results.AnalysisID).Err(err).Msg("Failed to marshal metrics")
 			return fmt.Errorf("failed to marshal metrics: %w", err)
 		}
 		metricsJson = sql.NullString{String: string(metrics), Valid: true}
@@ -207,6 +242,13 @@ func (r *PostgresAnalysisRepository) StoreResults(ctx context.Context, results *
 		metricsJson,
 		results.CreatedAt)
 
+	executionTime := time.Since(startTime)
+	if err != nil {
+		log.Error().Str("analysisID", results.AnalysisID).Dur("executionTime", executionTime).Err(err).Msg("Failed to store analysis results")
+		return err
+	}
+
+	log.Info().Str("analysisID", results.AnalysisID).Str("resultsID", results.ID).Dur("executionTime", executionTime).Msg("Analysis results stored successfully")
 	return err
 }
 

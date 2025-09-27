@@ -606,7 +606,7 @@ func (s *processingService) ProcessAnalysis(ctx context.Context, analysisID uuid
         return fmt.Errorf("failed to convert audio to WAV: %w", err)
     }
     defer os.Remove(wavFile) // Cleanup WAV file
-
+    
     // Step 5: Run Python analysis
     s.repository.UpdateStatus(ctx, analysisID, "processing", 50)
     cmd := exec.CommandContext(ctx, "python3", s.pythonPath, wavFile)
@@ -678,7 +678,7 @@ export const LiveRecorder: React.FC = () => {
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const streamRef = useRef<MediaStream | null>(null);
     const navigate = useNavigate();
-
+    
     // Form validation for room dimensions
     const isRoomFormValid = () => {
         // All empty = valid (skip room analysis)
@@ -749,7 +749,7 @@ export const LiveRecorder: React.FC = () => {
             };
 
             // Play pink noise test signal simultaneously with recording
-            const testSignal = new Audio('/test-signals/pink-noise-10s.wav');
+            const testSignal = new Audio('/test-signals/sweep-20-20k-10s.wav');
             testSignal.volume = 1.0;
 
             testSignal.onerror = () => {
@@ -802,7 +802,7 @@ export const LiveRecorder: React.FC = () => {
                 sessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
                 localStorage.setItem('sonara_session_id', sessionId);
             }
-
+            
             // Convert blob to file for the service
             const file = new File([audioBlob], 'recording', { type: mimeType });
 
@@ -843,7 +843,7 @@ export const LiveRecorder: React.FC = () => {
 
             // Navigate to analysis page (processing continues in background)
             navigate(`/analysis/${analysisId}`);
-
+            
         } catch (err: any) {
             // Use backend-provided error messages when available
             if (err.response?.data?.message) {
@@ -853,7 +853,7 @@ export const LiveRecorder: React.FC = () => {
             } else if (!navigator.onLine) {
                 setError('No internet connection. Please check your network.');
             } else {
-                setError('Upload failed. Please try again.');
+            setError('Upload failed. Please try again.');
             }
             setPhase('ready');
         }
@@ -868,7 +868,7 @@ export const LiveRecorder: React.FC = () => {
             streamRef.current.getTracks().forEach(track => track.stop());
         }
     }, [isRecording]);
-
+    
     return (
         <div className="w-full">
             <div
@@ -1006,15 +1006,15 @@ export const LiveRecorder: React.FC = () => {
                         <div className="text-6xl text-racing-green/40">⏳</div>
                         <div className="text-racing-green font-medium">
                             Processing your recording...
-                        </div>
+            </div>
                         <ProgressBar progress={progress} />
                         <p className="text-sm text-racing-green/60">
                             Analyzing frequency response and room characteristics...
                         </p>
                     </div>
                 )}
-
-                {error && (
+            
+            {error && (
                     <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg">
                         <p className="text-red-600 text-sm">{error}</p>
                         <button
@@ -1026,8 +1026,8 @@ export const LiveRecorder: React.FC = () => {
                         >
                             Try Again
                         </button>
-                    </div>
-                )}
+                </div>
+            )}
 
                 {phase === 'ready' && !error && (
                     <div className="mt-8 text-xs text-racing-green/60 max-w-md mx-auto">
@@ -1190,7 +1190,7 @@ const FrequencyChart = ({ data }: FrequencyChartProps) => {
 
     const freqTicks = generateFrequencyTicks();
     const dbTicks = generateDbTicks();
-
+    
     return (
         <div className="w-full overflow-x-auto">
             <svg width={width} height={height} className="border border-racing-green/20 rounded-lg bg-white">
@@ -1275,7 +1275,7 @@ const FrequencyChart = ({ data }: FrequencyChartProps) => {
                             y1={height - padding}
                             x2={tick.x}
                             y2={height - padding + 5}
-                            stroke="#004225"
+                    stroke="#004225"
                             strokeWidth="1"
                         />
                         <text

@@ -12,6 +12,7 @@ import (
 	"github.com/RMahshie/sonara/pkg/models"
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/google/uuid"
+	"github.com/rs/zerolog/log"
 )
 
 // AnalysisHandler handles analysis-related HTTP requests
@@ -32,8 +33,11 @@ func NewAnalysisHandler(repo repository.AnalysisRepository, s3Service storage.S3
 
 // CreateAnalysis creates a new analysis and returns an upload URL
 func (h *AnalysisHandler) CreateAnalysis(ctx context.Context, req *models.CreateAnalysisRequest) (*models.CreateAnalysisResponse, error) {
+	log.Info().Int64("fileSize", req.Body.FileSize).Str("signalID", req.Body.SignalID).Msg("Creating new analysis")
+
 	// Generate unique analysis ID
 	analysisID := uuid.New()
+	log.Info().Str("analysisID", analysisID.String()).Msg("Generated analysis ID")
 
 	// Generate S3 key for the audio file
 	audioKey := fmt.Sprintf("audio/%s.audio", analysisID)
@@ -47,6 +51,7 @@ func (h *AnalysisHandler) CreateAnalysis(ctx context.Context, req *models.Create
 	}
 
 	// Generate upload URL
+	log.Info().Str("audioKey", audioKey).Str("mimeType", req.Body.MimeType).Msg("Generating S3 upload URL")
 	uploadURL, err := h.s3Service.GenerateUploadURL(ctx, audioKey, req.Body.MimeType)
 	if err != nil {
 		// Check for specific error types and return user-friendly messages
@@ -56,11 +61,13 @@ func (h *AnalysisHandler) CreateAnalysis(ctx context.Context, req *models.Create
 		}
 		return nil, huma.Error400BadRequest("Failed to prepare upload. Please try again.", err)
 	}
+	log.Info().Str("uploadURL", uploadURL).Msg("S3 upload URL generated successfully")
 
 	// Create analysis record in database
 	analysis := &models.Analysis{
 		ID:         analysisID.String(),
 		SessionID:  req.Body.SessionID,
+		SignalID:   req.Body.SignalID, // Test signal identifier
 		Status:     "pending",
 		Progress:   0,
 		AudioS3Key: &audioKey,
@@ -68,10 +75,13 @@ func (h *AnalysisHandler) CreateAnalysis(ctx context.Context, req *models.Create
 		UpdatedAt:  time.Now(),
 	}
 
+	log.Info().Str("analysisID", analysisID.String()).Str("sessionID", req.Body.SessionID).Msg("Creating analysis record in database")
 	if err := h.repo.Create(ctx, analysis); err != nil {
 		return nil, huma.Error500InternalServerError("Failed to create analysis", err)
 	}
+	log.Info().Str("analysisID", analysisID.String()).Msg("Analysis record created successfully")
 
+	log.Info().Str("analysisID", analysisID.String()).Int("expiresIn", int((15 * time.Minute).Seconds())).Msg("Analysis created successfully, returning upload URL to client")
 	return &models.CreateAnalysisResponse{
 		Body: models.CreateAnalysisResponseBody{
 			ID:        analysis.ID,
@@ -83,6 +93,7 @@ func (h *AnalysisHandler) CreateAnalysis(ctx context.Context, req *models.Create
 
 // GetAnalysisStatus returns the current status of an analysis
 func (h *AnalysisHandler) GetAnalysisStatus(ctx context.Context, req *models.GetAnalysisStatusRequest) (*models.GetAnalysisStatusResponse, error) {
+	log.Info().Str("analysisID", req.ID).Msg("Status check request received")
 	analysisID, err := uuid.Parse(req.ID)
 	if err != nil {
 		return nil, huma.Error400BadRequest("Invalid analysis ID", err)
@@ -105,6 +116,7 @@ func (h *AnalysisHandler) GetAnalysisStatus(ctx context.Context, req *models.Get
 		}
 	}
 
+	log.Info().Str("analysisID", analysis.ID).Str("status", analysis.Status).Int("progress", analysis.Progress).Msg("Returning analysis status")
 	return &models.GetAnalysisStatusResponse{
 		Body: models.GetAnalysisStatusResponseBody{
 			ID:        analysis.ID,
@@ -157,18 +169,22 @@ func (h *AnalysisHandler) GetAnalysisResults(ctx context.Context, req *models.Ge
 
 // StartProcessing starts processing an uploaded file
 func (h *AnalysisHandler) StartProcessing(ctx context.Context, req *models.StartProcessingRequest) (*models.StartProcessingResponse, error) {
+	log.Info().Str("analysisID", req.ID).Msg("Processing start request received")
 	analysisID, err := uuid.Parse(req.ID)
 	if err != nil {
 		return nil, huma.Error400BadRequest("Invalid analysis ID", err)
 	}
 
 	// Verify analysis exists
+	log.Info().Str("analysisID", analysisID.String()).Msg("Verifying analysis exists")
 	_, err = h.repo.GetByID(ctx, analysisID)
 	if err != nil {
 		return nil, huma.Error404NotFound("Analysis not found", err)
 	}
+	log.Info().Str("analysisID", analysisID.String()).Msg("Analysis verification successful")
 
 	// Start processing in background (don't wait for completion)
+	log.Info().Str("analysisID", analysisID.String()).Msg("Starting background processing goroutine")
 	go func() {
 		err := h.processingSvc.ProcessAnalysis(context.Background(), analysisID)
 		if err != nil {

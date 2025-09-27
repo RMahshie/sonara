@@ -38,11 +38,12 @@ export interface RoomInfoInput {
 
 export const analysisService = {
   // Create analysis and get upload URL
-  createAnalysis: async (sessionId: string, file: File): Promise<CreateAnalysisResponse> => {
+  createAnalysis: async (sessionId: string, file: File, signalId: string): Promise<CreateAnalysisResponse> => {
     const response = await api.post<CreateAnalysisResponse>('/analyses', {
       session_id: sessionId,
       file_size: file.size,
-      mime_type: file.type
+      mime_type: file.type,
+      signal_id: signalId
     })
 
     return response.data

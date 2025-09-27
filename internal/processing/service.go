@@ -8,11 +8,13 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/RMahshie/sonara/internal/repository"
 	"github.com/RMahshie/sonara/internal/storage"
 	"github.com/RMahshie/sonara/pkg/models"
 	"github.com/google/uuid"
+	"github.com/rs/zerolog/log"
 )
 
 type ProcessingService interface {
@@ -34,18 +36,25 @@ func NewProcessingService(s3Service storage.S3Service, repo repository.AnalysisR
 }
 
 func (s *processingService) ProcessAnalysis(ctx context.Context, analysisID uuid.UUID) error {
+	log.Info().Str("analysisID", analysisID.String()).Msg("Starting audio processing pipeline")
+
 	// Step 1: Update to processing status
+	log.Info().Str("analysisID", analysisID.String()).Msg("Step 1: Updating status to processing (10%)")
 	if err := s.repository.UpdateStatus(ctx, analysisID, "processing", 10); err != nil {
 		return err
 	}
+	log.Info().Str("analysisID", analysisID.String()).Msg("Status updated to processing successfully")
 
 	// Step 2: Get analysis details
+	log.Info().Str("analysisID", analysisID.String()).Msg("Step 2: Retrieving analysis details from database")
 	analysis, err := s.repository.GetByID(ctx, analysisID)
 	if err != nil {
 		return err
 	}
+	log.Info().Str("analysisID", analysisID.String()).Str("signalID", analysis.SignalID).Str("audioS3Key", *analysis.AudioS3Key).Msg("Analysis details retrieved successfully")
 
 	// Step 3: Download from S3
+	log.Info().Str("analysisID", analysisID.String()).Msg("Step 3: Updating status to processing (20%)")
 	if err := s.repository.UpdateStatus(ctx, analysisID, "processing", 20); err != nil {
 		return err
 	}
@@ -55,86 +64,113 @@ func (s *processingService) ProcessAnalysis(ctx context.Context, analysisID uuid
 	var audioData []byte
 
 	if strings.HasPrefix(*analysis.AudioS3Key, "test-") {
+		log.Info().Str("analysisID", analysisID.String()).Str("filePath", "/tmp/"+*analysis.AudioS3Key).Msg("Downloading from test file")
 		audioData, err = os.ReadFile("/tmp/" + *analysis.AudioS3Key)
 		if err != nil {
 			s.repository.UpdateError(ctx, analysisID, "Failed to read test audio file")
 			return nil // Don't return error, status is updated to failed
 		}
+		log.Info().Str("analysisID", analysisID.String()).Int("fileSize", len(audioData)).Msg("Test file downloaded successfully")
 	} else if strings.HasPrefix(*analysis.AudioS3Key, "minio-real-") {
 		// Integration test: read from simulated MinIO upload location
+		log.Info().Str("analysisID", analysisID.String()).Str("filePath", "/tmp/"+*analysis.AudioS3Key).Msg("Downloading from MinIO test file")
 		audioData, err = os.ReadFile("/tmp/" + *analysis.AudioS3Key)
 		if err != nil {
 			s.repository.UpdateError(ctx, analysisID, "Failed to download from MinIO")
 			return nil // Don't return error, status is updated to failed
 		}
+		log.Info().Str("analysisID", analysisID.String()).Int("fileSize", len(audioData)).Msg("MinIO test file downloaded successfully")
 	} else {
+		log.Info().Str("analysisID", analysisID.String()).Str("s3Key", *analysis.AudioS3Key).Msg("Downloading from S3")
 		audioData, err = s.s3.DownloadFile(ctx, *analysis.AudioS3Key)
 		if err != nil {
 			s.repository.UpdateError(ctx, analysisID, "Failed to download audio")
 			return nil // Don't return error, status is updated to failed
 		}
+		log.Info().Str("analysisID", analysisID.String()).Int("fileSize", len(audioData)).Msg("S3 download completed successfully")
 	}
 
 	// Step 4: Save to temp file
+	log.Info().Str("analysisID", analysisID.String()).Msg("Step 4: Saving audio data to temp file")
 	tempFile := filepath.Join("/tmp", fmt.Sprintf("%s.audio", analysisID))
 	if err := os.WriteFile(tempFile, audioData, 0644); err != nil {
 		return err
 	}
 	defer os.Remove(tempFile) // Always cleanup
+	log.Info().Str("analysisID", analysisID.String()).Str("tempFile", tempFile).Int("fileSize", len(audioData)).Msg("Temp file created successfully")
 
 	// Step 4.5: Convert WebM/OGG to WAV for Python compatibility
+	log.Info().Str("analysisID", analysisID.String()).Msg("Step 4.5: Converting audio to WAV format with FFmpeg")
 	wavFile := filepath.Join("/tmp", fmt.Sprintf("%s.wav", analysisID))
 	convertCmd := exec.Command("ffmpeg", "-i", tempFile, "-acodec", "pcm_s16le", "-ar", "48000", "-y", wavFile)
 	if err := convertCmd.Run(); err != nil {
 		return fmt.Errorf("failed to convert audio to WAV: %w", err)
 	}
 	defer os.Remove(wavFile) // Cleanup WAV file
+	log.Info().Str("analysisID", analysisID.String()).Str("wavFile", wavFile).Msg("FFmpeg conversion completed successfully")
 
-	// Step 5: Run Python analysis with room data if available
+	// Step 5: Run Python analysis with sweep deconvolution
+	log.Info().Str("analysisID", analysisID.String()).Msg("Step 5: Updating status to processing (50%)")
 	if err := s.repository.UpdateStatus(ctx, analysisID, "processing", 50); err != nil {
 		return err
 	}
 
-	// Get room info for enhanced analysis
-	roomInfo, err := s.repository.GetRoomInfo(ctx, analysisID)
+	// Get analysis record to obtain signal ID
+	log.Info().Str("analysisID", analysisID.String()).Msg("Retrieving updated analysis record for signal ID")
+	analysis, err = s.repository.GetByID(ctx, analysisID)
+	if err != nil {
+		return fmt.Errorf("failed to get analysis: %w", err)
+	}
+
+	// Generate unique result file path
+	resultFile := filepath.Join("/tmp", fmt.Sprintf("%s.result.json", analysisID))
+	defer os.Remove(resultFile) // GUARANTEED cleanup
 
 	// Use virtual environment python
 	pythonCmd := "/Users/rmahshie/Downloads/projects/sonara/scripts/venv/bin/python3"
+	log.Info().Str("analysisID", analysisID.String()).Str("pythonCmd", pythonCmd).Str("scriptPath", s.pythonPath).Str("wavFile", wavFile).Str("signalID", analysis.SignalID).Str("resultFile", resultFile).Msg("Starting Python script execution")
 
-	var cmd *exec.Cmd
-	if err == nil && roomInfo != nil && roomInfo.RoomLength > 0 && roomInfo.RoomWidth > 0 && roomInfo.RoomHeight > 0 {
-		// Pass room data to Python for enhanced analysis
-		roomData := map[string]interface{}{
-			"room_length":                      roomInfo.RoomLength,
-			"room_width":                       roomInfo.RoomWidth,
-			"room_height":                      roomInfo.RoomHeight,
-			"speaker_distance_from_front_wall": roomInfo.SpeakerDistanceFromFrontWall,
-		}
+	// Pass signal ID and result file path to Python script
+	cmd := exec.CommandContext(ctx, pythonCmd, s.pythonPath, wavFile, analysis.SignalID, resultFile)
 
-		roomDataJSON, err := json.Marshal(roomData)
-		if err != nil {
-			// Fallback to analysis without room data
-			cmd = exec.CommandContext(ctx, pythonCmd, s.pythonPath, wavFile)
-		} else {
-			cmd = exec.CommandContext(ctx, pythonCmd, s.pythonPath, wavFile, string(roomDataJSON))
-		}
-	} else {
-		// No room data available, use original approach
-		cmd = exec.CommandContext(ctx, pythonCmd, s.pythonPath, wavFile)
-	}
-
+	startTime := time.Now()
 	output, err := cmd.CombinedOutput()
+	executionTime := time.Since(startTime)
+
 	if err != nil {
 		outputStr := string(output)
-		fmt.Printf("Python script output: %s\n", outputStr)
+		log.Error().Str("analysisID", analysisID.String()).Dur("executionTime", executionTime).Err(err).Str("output", outputStr).Msg("Python script execution failed")
 		s.repository.UpdateError(ctx, analysisID, fmt.Sprintf("Audio analysis failed: %s", outputStr))
 		return fmt.Errorf("python analysis failed: %w, output: %s", err, outputStr)
 	}
 
+	log.Info().Str("analysisID", analysisID.String()).Dur("executionTime", executionTime).Msg("Python script execution completed successfully")
+
 	// Step 6: Parse results
+	log.Info().Str("analysisID", analysisID.String()).Msg("Step 6: Updating status to processing (80%)")
 	if err := s.repository.UpdateStatus(ctx, analysisID, "processing", 80); err != nil {
 		return err
 	}
+
+	// Read result from file
+	log.Info().Str("analysisID", analysisID.String()).Msg("Reading result file")
+	resultData, err := os.ReadFile(resultFile)
+	if err != nil {
+		log.Error().Str("analysisID", analysisID.String()).Err(err).Msg("Failed to read result file")
+		s.repository.UpdateError(ctx, analysisID, "Failed to read analysis results")
+		return fmt.Errorf("failed to read result file: %w", err)
+	}
+
+	if len(resultData) == 0 {
+		log.Error().Str("analysisID", analysisID.String()).Msg("Result file is empty")
+		s.repository.UpdateError(ctx, analysisID, "Analysis produced no results")
+		return fmt.Errorf("empty result file")
+	}
+
+	log.Info().Str("analysisID", analysisID.String()).Int("resultSize", len(resultData)).Msg("Result file read successfully")
+
+	// Parse JSON from file content
+	log.Info().Str("analysisID", analysisID.String()).Msg("Parsing JSON results")
 	var result struct {
 		FrequencyData []models.FrequencyPoint `json:"frequency_data"`
 		RT60          float64                 `json:"rt60"`
@@ -142,19 +178,26 @@ func (s *processingService) ProcessAnalysis(ctx context.Context, analysisID uuid
 		Error         string                  `json:"error,omitempty"`
 	}
 
-	if err := json.Unmarshal(output, &result); err != nil {
+	if err := json.Unmarshal(resultData, &result); err != nil {
+		log.Error().Str("analysisID", analysisID.String()).Err(err).Msg("Failed to parse JSON results")
 		return fmt.Errorf("failed to parse results: %w", err)
 	}
 
 	if result.Error != "" {
+		log.Error().Str("analysisID", analysisID.String()).Str("error", result.Error).Msg("Python script reported error")
 		s.repository.UpdateError(ctx, analysisID, result.Error)
 		return fmt.Errorf("analysis error: %s", result.Error)
 	}
 
+	log.Info().Str("analysisID", analysisID.String()).Int("frequencyPoints", len(result.FrequencyData)).Float64("rt60", result.RT60).Msg("Results parsed successfully")
+
 	// Step 7: Store results
+	log.Info().Str("analysisID", analysisID.String()).Msg("Step 7: Updating status to processing (90%)")
 	if err := s.repository.UpdateStatus(ctx, analysisID, "processing", 90); err != nil {
 		return err
 	}
+
+	log.Info().Str("analysisID", analysisID.String()).Msg("Processing and storing analysis results")
 
 	// Convert room modes to the expected format
 	var roomModes []float64
@@ -185,6 +228,7 @@ func (s *processingService) ProcessAnalysis(ctx context.Context, analysisID uuid
 	}
 
 	// Store results in database
+	log.Info().Str("analysisID", analysisID.String()).Int("roomModes", len(roomModes)).Msg("Storing results in database")
 
 	results := &models.AnalysisResults{
 		ID:            uuid.New().String(),
@@ -196,13 +240,19 @@ func (s *processingService) ProcessAnalysis(ctx context.Context, analysisID uuid
 	}
 
 	if err := s.repository.StoreResults(ctx, results); err != nil {
+		log.Error().Str("analysisID", analysisID.String()).Err(err).Msg("Failed to store results in database")
 		return err
 	}
+
+	log.Info().Str("analysisID", analysisID.String()).Str("resultsID", results.ID).Msg("Results stored successfully")
 
 	// Step 8: Mark complete
+	log.Info().Str("analysisID", analysisID.String()).Msg("Step 8: Marking analysis as completed (100%)")
 	if err := s.repository.UpdateStatus(ctx, analysisID, "completed", 100); err != nil {
+		log.Error().Str("analysisID", analysisID.String()).Err(err).Msg("Failed to mark analysis as completed")
 		return err
 	}
 
+	log.Info().Str("analysisID", analysisID.String()).Msg("Audio processing pipeline completed successfully")
 	return nil
 }

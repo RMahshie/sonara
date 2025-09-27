@@ -3,6 +3,9 @@ import { useNavigate } from 'react-router-dom'
 import { analysisService } from '../services/analysisService'
 import ProgressBar from './ProgressBar'
 
+// Test signal configuration
+const TEST_SIGNAL = "sine_sweep_20_20k"
+
 export const LiveRecorder: React.FC = () => {
   const [isRecording, setIsRecording] = useState(false)
   const [progress, setProgress] = useState(0)
@@ -88,7 +91,7 @@ export const LiveRecorder: React.FC = () => {
       }
 
       // Play test signal and record simultaneously
-      const testSignal = new Audio('/test-signals/pink-noise-10s.wav')
+      const testSignal = new Audio('/test-signals/sweep-20-20k-10s.wav')
       testSignal.volume = 1.0
 
       // Add error handlers for test signal
@@ -159,7 +162,7 @@ export const LiveRecorder: React.FC = () => {
       const file = new File([audioBlob], 'recording', { type: mimeType })
 
       // Phase 1: Create analysis and get upload URL
-      const { id: analysisId, upload_url: uploadUrl } = await analysisService.createAnalysis(sessionId, file)
+      const { id: analysisId, upload_url: uploadUrl } = await analysisService.createAnalysis(sessionId, file, TEST_SIGNAL)
 
       // Send room dimensions if provided
       if (roomDimensions.length || roomDimensions.width || roomDimensions.height) {
