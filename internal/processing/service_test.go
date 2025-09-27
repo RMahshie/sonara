@@ -144,17 +144,6 @@ func TestFullAnalysisPipeline_Integration(t *testing.T) {
 		t.Skip("Skipping integration test in short mode")
 	}
 
-	// Set PYTHON_CMD for consistent Python environment in tests
-	originalPythonCmd := os.Getenv("PYTHON_CMD")
-	os.Setenv("PYTHON_CMD", "../../scripts/venv/bin/python3")
-	defer func() {
-		if originalPythonCmd == "" {
-			os.Unsetenv("PYTHON_CMD")
-		} else {
-			os.Setenv("PYTHON_CMD", originalPythonCmd)
-		}
-	}()
-
 	tc := SetupIntegrationTest(t)
 	defer tc.CleanupIntegrationTest(t)
 
@@ -399,17 +388,6 @@ func TestMinIOEndToEndAnalysis_Integration(t *testing.T) {
 		t.Skip("Skipping MinIO end-to-end test in short mode")
 	}
 
-	// Set PYTHON_CMD for consistent Python environment in tests
-	originalPythonCmd := os.Getenv("PYTHON_CMD")
-	os.Setenv("PYTHON_CMD", "../../scripts/venv/bin/python3")
-	defer func() {
-		if originalPythonCmd == "" {
-			os.Unsetenv("PYTHON_CMD")
-		} else {
-			os.Setenv("PYTHON_CMD", originalPythonCmd)
-		}
-	}()
-
 	tc := SetupIntegrationTest(t)
 	defer tc.CleanupIntegrationTest(t)
 
@@ -585,17 +563,6 @@ func TestAnalysisPipelineFailure_Integration(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
 	}
-
-	// Set PYTHON_CMD for consistent Python environment in tests
-	originalPythonCmd := os.Getenv("PYTHON_CMD")
-	os.Setenv("PYTHON_CMD", "../../scripts/venv/bin/python3")
-	defer func() {
-		if originalPythonCmd == "" {
-			os.Unsetenv("PYTHON_CMD")
-		} else {
-			os.Setenv("PYTHON_CMD", originalPythonCmd)
-		}
-	}()
 
 	tc := SetupIntegrationTest(t)
 	defer tc.CleanupIntegrationTest(t)

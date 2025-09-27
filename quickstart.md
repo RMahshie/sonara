@@ -39,6 +39,18 @@ pnpm test
 
 ## 🚀 Local Development
 
+### 0. Configure Python Command
+
+**Development uses Docker containers for consistency:**
+
+```bash
+# Set PYTHON_CMD for development (uses analyzer container)
+export PYTHON_CMD="docker exec analyzer python /app/analyze_audio.py"
+
+# For production, this would be:
+# export PYTHON_CMD="python /app/scripts/analyze_audio.py"
+```
+
 ### 1. Start Infrastructure
 ```bash
 # Start all Docker services (PostgreSQL, MinIO, Python analyzer)
