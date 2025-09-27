@@ -1,4 +1,5 @@
 import { useRef, useEffect, useState } from 'react'
+import { line, curveMonotoneX } from 'd3-shape'
 
 interface FrequencyData {
   frequency: number
@@ -49,8 +50,8 @@ const FrequencyChart = ({ data }: FrequencyChartProps) => {
   // Fixed ranges for professional audio visualization
   const FREQ_MIN = 20
   const FREQ_MAX = 20000
-  const DB_MIN = -15
-  const DB_MAX = 15
+  const DB_MIN = -25
+  const DB_MAX = 25
 
   // Generate tick marks
   const generateFrequencyTicks = (): Array<{ x: number; label: string; freq: number }> => {
@@ -70,7 +71,7 @@ const FrequencyChart = ({ data }: FrequencyChartProps) => {
 
   const generateDbTicks = (): Array<{ y: number; label: string; db: number }> => {
     const ticks: Array<{ y: number; label: string; db: number }> = []
-    const dbValues = [-15, -10, -5, 0, 5, 10, 15]
+    const dbValues = [-25, -20, -15, -10, -5, 0, 5, 10, 15, 20, 25]
 
     dbValues.forEach(db => {
       const y = yScale(db)
@@ -98,17 +99,16 @@ const FrequencyChart = ({ data }: FrequencyChartProps) => {
     .filter(d => d.frequency >= FREQ_MIN && d.frequency <= FREQ_MAX && !isNaN(d.magnitude))
     .sort((a, b) => a.frequency - b.frequency)
 
-  // Generate smooth curve path
+  // Generate smooth curve path using monotonic interpolation
   const generatePath = () => {
     if (filteredData.length === 0) return ''
 
-    let path = `M ${xScale(filteredData[0].frequency)} ${yScale(filteredData[0].magnitude)}`
+    const lineGenerator = line<FrequencyData>()
+      .x((d: FrequencyData) => xScale(d.frequency))
+      .y((d: FrequencyData) => yScale(d.magnitude))
+      .curve(curveMonotoneX)
 
-    for (let i = 1; i < filteredData.length; i++) {
-      path += ` L ${xScale(filteredData[i].frequency)} ${yScale(filteredData[i].magnitude)}`
-    }
-
-    return path
+    return lineGenerator(filteredData) || ''
   }
 
   const freqTicks = generateFrequencyTicks()

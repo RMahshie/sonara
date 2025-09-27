@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "d3-shape": "^3.2.0"
+  }
+}

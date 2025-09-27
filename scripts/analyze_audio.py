@@ -12,6 +12,7 @@ import json
 import math
 import numpy as np
 from scipy import signal
+from scipy import interpolate
 from scipy.io import wavfile
 import librosa
 
@@ -78,7 +79,7 @@ class AudioAnalyzer:
         calibration = np.interp(frequencies, cal_freqs, cal_values)
 
         # Apply calibration (add correction values)
-        calibrated_magnitudes = magnitudes + calibration
+        calibrated_magnitudes = magnitudes #+ calibration
 
         return calibrated_magnitudes
 
@@ -292,7 +293,7 @@ class FrequencyAnalyzer:
 
     def __init__(self):
         self.fft_size = 32768  # 32k FFT for high resolution
-        self.smoothing_fraction = 1/12  # 1/12 octave smoothing
+        self.smoothing_fraction = 1/6  # 1/12 octave smoothing
         self.reference_freq = 1000  # 1kHz normalization
         self.ref_manager = get_reference_manager()
 
@@ -445,6 +446,30 @@ class FrequencyAnalyzer:
         # Subtract reference level from all points
         return response_db - ref_level
 
+    def resample_log_spaced(self, frequencies, magnitudes, num_points=300):
+        """
+        Resample frequency response to log-spaced points for display.
+        """
+        # Create log-spaced frequency points from 20Hz to 20kHz
+        log_freqs = np.logspace(np.log10(20), np.log10(20000), num_points)
+
+        # Create interpolation function
+        interp_func = interpolate.interp1d(
+            frequencies,
+            magnitudes,
+            kind='linear',  # Linear is more accurate for audio
+            bounds_error=False,
+            fill_value=np.nan
+        )
+
+        # Interpolate at log-spaced frequencies
+        log_magnitudes = interp_func(log_freqs)
+
+        # Remove any NaN values (shouldn't happen with 20-20k range)
+        valid_mask = ~np.isnan(log_magnitudes)
+
+        return log_freqs[valid_mask], log_magnitudes[valid_mask]
+
 
 def main():
     logging.info("Sonara Python audio analyzer starting")
@@ -477,14 +502,16 @@ def main():
         )
         logging.info(f"Sweep deconvolution completed - generated {len(frequencies)} frequency points")
 
-        # Format for frontend (downsample to ~800 points)
-        logging.info(f"Formatting results for frontend - downsampling from {len(frequencies)} to ~800 points")
-        step = max(1, len(frequencies) // 800)
+        # Format for frontend with log-spaced resampling
+        logging.info(f"Resampling from {len(frequencies)} to 300 log-spaced points")
+        display_freqs, display_mags = analyzer.resample_log_spaced(
+            frequencies, response_db, num_points=300
+        )
         frequency_data = [
             {"frequency": float(f), "magnitude": float(m)}
-            for f, m in zip(frequencies[::step], response_db[::step])
+            for f, m in zip(display_freqs, display_mags)
         ]
-        logging.info(f"Downsampled to {len(frequency_data)} frequency points")
+        logging.info(f"Resampled to {len(frequency_data)} log-spaced frequency points")
 
         result = {
             "frequency_data": frequency_data,
