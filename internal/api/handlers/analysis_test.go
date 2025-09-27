@@ -111,10 +111,12 @@ func TestCreateAnalysis(t *testing.T) {
 					SessionID string `json:"session_id" minLength:"10" maxLength:"50" required:"true" doc:"Client session identifier"`
 					FileSize  int64  `json:"file_size" minimum:"1000" maximum:"20971520" required:"true" doc:"Audio file size in bytes"`
 					MimeType  string `json:"mime_type" enum:"audio/wav,audio/mpeg,audio/flac,audio/webm,audio/ogg" required:"true" doc:"Audio file MIME type"`
+					SignalID  string `json:"signal_id" required:"true" doc:"Test signal identifier (e.g., 'sine_sweep_20_20k')"`
 				}{
 					SessionID: "test-session-123",
 					FileSize:  5242880, // 5MB
 					MimeType:  "audio/wav",
+					SignalID:  "sine_sweep_20_20k",
 				},
 			},
 			mockSetup: func(mockRepo *MockAnalysisRepository, mockS3 *MockS3Service, mockProc *MockProcessingService) {
@@ -131,10 +133,12 @@ func TestCreateAnalysis(t *testing.T) {
 					SessionID string `json:"session_id" minLength:"10" maxLength:"50" required:"true" doc:"Client session identifier"`
 					FileSize  int64  `json:"file_size" minimum:"1000" maximum:"20971520" required:"true" doc:"Audio file size in bytes"`
 					MimeType  string `json:"mime_type" enum:"audio/wav,audio/mpeg,audio/flac,audio/webm,audio/ogg" required:"true" doc:"Audio file MIME type"`
+					SignalID  string `json:"signal_id" required:"true" doc:"Test signal identifier (e.g., 'sine_sweep_20_20k')"`
 				}{
 					SessionID: "test-session-123",
 					FileSize:  25000000, // 25MB
 					MimeType:  "audio/wav",
+					SignalID:  "sine_sweep_20_20k",
 				},
 			},
 			mockSetup: func(mockRepo *MockAnalysisRepository, mockS3 *MockS3Service, mockProc *MockProcessingService) {
@@ -150,10 +154,12 @@ func TestCreateAnalysis(t *testing.T) {
 					SessionID string `json:"session_id" minLength:"10" maxLength:"50" required:"true" doc:"Client session identifier"`
 					FileSize  int64  `json:"file_size" minimum:"1000" maximum:"20971520" required:"true" doc:"Audio file size in bytes"`
 					MimeType  string `json:"mime_type" enum:"audio/wav,audio/mpeg,audio/flac,audio/webm,audio/ogg" required:"true" doc:"Audio file MIME type"`
+					SignalID  string `json:"signal_id" required:"true" doc:"Test signal identifier (e.g., 'sine_sweep_20_20k')"`
 				}{
 					SessionID: "test-session-123",
 					FileSize:  5242880,
 					MimeType:  "audio/wav",
+					SignalID:  "sine_sweep_20_20k",
 				},
 			},
 			mockSetup: func(mockRepo *MockAnalysisRepository, mockS3 *MockS3Service, mockProc *MockProcessingService) {
@@ -252,10 +258,12 @@ func TestCreateAnalysis_ErrorMessages(t *testing.T) {
 					SessionID string `json:"session_id" minLength:"10" maxLength:"50" required:"true" doc:"Client session identifier"`
 					FileSize  int64  `json:"file_size" minimum:"1000" maximum:"20971520" required:"true" doc:"Audio file size in bytes"`
 					MimeType  string `json:"mime_type" enum:"audio/wav,audio/mpeg,audio/flac,audio/webm,audio/ogg" required:"true" doc:"Audio file MIME type"`
+					SignalID  string `json:"signal_id" required:"true" doc:"Test signal identifier (e.g., 'sine_sweep_20_20k')"`
 				}{
 					SessionID: "test-session",
 					FileSize:  tt.fileSize,
 					MimeType:  tt.mimeType,
+					SignalID:  "sine_sweep_20_20k",
 				},
 			}
 
