@@ -16,8 +16,8 @@ const FrequencyChart = ({ data }: FrequencyChartProps) => {
   // Fixed ranges for professional audio visualization
   const FREQ_MIN = 20
   const FREQ_MAX = 20000
-  const DB_MIN = -15
-  const DB_MAX = 15
+  const DB_MIN = -25
+  const DB_MAX = 25
 
   // Generate tick marks
   const generateFrequencyTicks = (): Array<{ x: number; label: string; freq: number }> => {
@@ -37,7 +37,7 @@ const FrequencyChart = ({ data }: FrequencyChartProps) => {
 
   const generateDbTicks = (): Array<{ y: number; label: string; db: number }> => {
     const ticks: Array<{ y: number; label: string; db: number }> = []
-    const dbValues = [-15, -10, -5, 0, 5, 10, 15]
+    const dbValues = [-25, -20, -15, -10, -5, 0, 5, 10, 15, 20, 25]
 
     dbValues.forEach(db => {
       const y = yScale(db)

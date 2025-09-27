@@ -24,27 +24,19 @@ type ProcessingService interface {
 type processingService struct {
 	s3         storage.S3Service
 	repository repository.AnalysisRepository
-	pythonPath string // Absolute path to "scripts/analyze_audio.py"
-	pythonCmd  string // Python command to use (from config)
+	pythonPath string   // Absolute path to "scripts/analyze_audio.py"
+	pythonArgs []string // Python command arguments (for Docker or direct execution)
 }
 
 func NewProcessingService(s3Service storage.S3Service, repo repository.AnalysisRepository, pythonPath string) ProcessingService {
-	// Make pythonCmd configurable via environment variable with fallback
-	pythonCmd := os.Getenv("PYTHON_CMD")
-	if pythonCmd == "" {
-		// Try to detect virtual environment
-		if venv := os.Getenv("VIRTUAL_ENV"); venv != "" {
-			pythonCmd = filepath.Join(venv, "bin", "python3")
-		} else {
-			pythonCmd = "python3" // System python fallback
-		}
-	}
+	// Hardcode Docker analyzer container command for development
+	pythonArgs := []string{"docker", "exec", "sonara-analyzer-1", "python", "/app/analyze_audio.py"}
 
 	return &processingService{
 		s3:         s3Service,
 		repository: repo,
 		pythonPath: pythonPath,
-		pythonCmd:  pythonCmd,
+		pythonArgs: pythonArgs,
 	}
 }
 
@@ -140,10 +132,11 @@ func (s *processingService) ProcessAnalysis(ctx context.Context, analysisID uuid
 	defer os.Remove(resultFile) // GUARANTEED cleanup
 
 	// Use configured python command
-	log.Info().Str("analysisID", analysisID.String()).Str("pythonCmd", s.pythonCmd).Str("scriptPath", s.pythonPath).Str("wavFile", wavFile).Str("signalID", analysis.SignalID).Str("resultFile", resultFile).Msg("Starting Python script execution")
+	log.Info().Str("analysisID", analysisID.String()).Strs("pythonArgs", s.pythonArgs).Str("scriptPath", s.pythonPath).Str("wavFile", wavFile).Str("signalID", analysis.SignalID).Str("resultFile", resultFile).Msg("Starting Python script execution")
 
 	// Pass signal ID and result file path to Python script
-	cmd := exec.CommandContext(ctx, s.pythonCmd, s.pythonPath, wavFile, analysis.SignalID, resultFile)
+	args := append(s.pythonArgs, wavFile, analysis.SignalID, resultFile)
+	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
 
 	startTime := time.Now()
 	output, err := cmd.CombinedOutput()
