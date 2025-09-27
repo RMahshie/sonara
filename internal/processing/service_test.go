@@ -144,6 +144,17 @@ func TestFullAnalysisPipeline_Integration(t *testing.T) {
 		t.Skip("Skipping integration test in short mode")
 	}
 
+	// Set PYTHON_CMD for consistent Python environment in tests
+	originalPythonCmd := os.Getenv("PYTHON_CMD")
+	os.Setenv("PYTHON_CMD", "../../scripts/venv/bin/python3")
+	defer func() {
+		if originalPythonCmd == "" {
+			os.Unsetenv("PYTHON_CMD")
+		} else {
+			os.Setenv("PYTHON_CMD", originalPythonCmd)
+		}
+	}()
+
 	tc := SetupIntegrationTest(t)
 	defer tc.CleanupIntegrationTest(t)
 
@@ -170,7 +181,7 @@ func TestFullAnalysisPipeline_Integration(t *testing.T) {
 	s3Service, err := storage.NewS3Service(s3Config)
 	require.NoError(t, err)
 
-	processingService := NewProcessingService(s3Service, repo, "../../scripts/analyze_audio.py")
+	processingService := NewProcessingService(s3Service, repo, "../../scripts/analyze_audio.py", "python3")
 
 	// Generate test audio file (1kHz sine wave)
 	audioData := generateTestAudio(t, 1000.0, 44100, 2.0)
@@ -188,6 +199,7 @@ func TestFullAnalysisPipeline_Integration(t *testing.T) {
 	analysis := &models.Analysis{
 		ID:         uuid.New().String(), // Generate UUID for the analysis
 		SessionID:  uuid.New().String(),
+		SignalID:   "sine_sweep_20_20k", // Valid signal ID for testing
 		Status:     "pending",
 		Progress:   0,
 		AudioS3Key: &audioKeyPtr,
@@ -275,6 +287,9 @@ processingComplete:
 		}
 	}
 	assert.True(t, peakFound, "1kHz peak not found in analysis results")
+
+	// Verify result file cleanup
+	assertResultFileCleanup(t, analysisID)
 }
 
 // TestMinIOFileOperations_Integration tests actual MinIO upload/download operations
@@ -384,6 +399,17 @@ func TestMinIOEndToEndAnalysis_Integration(t *testing.T) {
 		t.Skip("Skipping MinIO end-to-end test in short mode")
 	}
 
+	// Set PYTHON_CMD for consistent Python environment in tests
+	originalPythonCmd := os.Getenv("PYTHON_CMD")
+	os.Setenv("PYTHON_CMD", "../../scripts/venv/bin/python3")
+	defer func() {
+		if originalPythonCmd == "" {
+			os.Unsetenv("PYTHON_CMD")
+		} else {
+			os.Setenv("PYTHON_CMD", originalPythonCmd)
+		}
+	}()
+
 	tc := SetupIntegrationTest(t)
 	defer tc.CleanupIntegrationTest(t)
 
@@ -410,7 +436,7 @@ func TestMinIOEndToEndAnalysis_Integration(t *testing.T) {
 	s3Service, err := storage.NewS3Service(s3Config)
 	require.NoError(t, err)
 
-	processingService := NewProcessingService(s3Service, repo, "../../scripts/analyze_audio.py")
+	processingService := NewProcessingService(s3Service, repo, "../../scripts/analyze_audio.py", "python3")
 
 	// Generate test audio file (1kHz sine wave) - same as other tests
 	audioData := generateTestAudio(t, 1000.0, 44100, 2.0)
@@ -432,6 +458,7 @@ func TestMinIOEndToEndAnalysis_Integration(t *testing.T) {
 	analysis := &models.Analysis{
 		ID:         uuid.New().String(),
 		SessionID:  uuid.New().String(),
+		SignalID:   "sine_sweep_20_20k", // Valid signal ID for testing
 		Status:     "pending",
 		Progress:   0,
 		AudioS3Key: &nonExistentKey, // Real MinIO key - will trigger actual download
@@ -507,6 +534,9 @@ analysisComplete:
 	}
 	assert.True(t, peakFound, "1kHz peak not found in analysis results from MinIO")
 
+	// Verify result file cleanup
+	assertResultFileCleanup(t, analysisID)
+
 	// Cleanup: Delete the test file from MinIO
 	err = s3Service.DeleteFile(ctx, audioKey)
 	assert.NoError(t, err, "Failed to cleanup test file from MinIO")
@@ -556,6 +586,17 @@ func TestAnalysisPipelineFailure_Integration(t *testing.T) {
 		t.Skip("Skipping integration test in short mode")
 	}
 
+	// Set PYTHON_CMD for consistent Python environment in tests
+	originalPythonCmd := os.Getenv("PYTHON_CMD")
+	os.Setenv("PYTHON_CMD", "../../scripts/venv/bin/python3")
+	defer func() {
+		if originalPythonCmd == "" {
+			os.Unsetenv("PYTHON_CMD")
+		} else {
+			os.Setenv("PYTHON_CMD", originalPythonCmd)
+		}
+	}()
+
 	tc := SetupIntegrationTest(t)
 	defer tc.CleanupIntegrationTest(t)
 
@@ -582,7 +623,7 @@ func TestAnalysisPipelineFailure_Integration(t *testing.T) {
 	s3Service, err := storage.NewS3Service(s3Config)
 	require.NoError(t, err)
 
-	processingService := NewProcessingService(s3Service, repo, "../../scripts/analyze_audio.py")
+	processingService := NewProcessingService(s3Service, repo, "../../scripts/analyze_audio.py", "python3")
 
 	// Create analysis with non-existent S3 key
 	nonExistentKey := "non-existent-file.wav"
@@ -590,6 +631,7 @@ func TestAnalysisPipelineFailure_Integration(t *testing.T) {
 	analysis := &models.Analysis{
 		ID:         uuid.New().String(),
 		SessionID:  uuid.New().String(),
+		SignalID:   "sine_sweep_20_20k", // Valid signal ID for testing (though test expects failure from S3)
 		Status:     "pending",
 		Progress:   0,
 		AudioS3Key: &nonExistentKey,
@@ -630,9 +672,19 @@ func TestAnalysisPipelineFailure_Integration(t *testing.T) {
 processingComplete:
 	// Verify analysis failed as expected
 	assert.Equal(t, "failed", finalAnalysis.Status)
+
+	// Verify result file cleanup even on failure
+	assertResultFileCleanup(t, analysisID)
 }
 
 // Helper functions
+
+// assertResultFileCleanup verifies that result temp files are properly cleaned up
+func assertResultFileCleanup(t *testing.T, analysisID uuid.UUID) {
+	t.Helper()
+	resultFilePath := fmt.Sprintf("/tmp/%s.result.json", analysisID)
+	assert.NoFileExists(t, resultFilePath, "Result file should be cleaned up after processing")
+}
 
 func runMigrations(t *testing.T, dbURL string) error {
 	t.Helper()

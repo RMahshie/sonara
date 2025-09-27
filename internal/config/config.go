@@ -8,10 +8,11 @@ import (
 
 // Config holds all configuration for the application
 type Config struct {
-	Database DatabaseConfig
-	Server   ServerConfig
-	AWS      AWSConfig
-	OpenAI   OpenAIConfig
+	Database   DatabaseConfig
+	Server     ServerConfig
+	AWS        AWSConfig
+	OpenAI     OpenAIConfig
+	Processing ProcessingConfig
 }
 
 // DatabaseConfig holds database configuration
@@ -40,6 +41,11 @@ type OpenAIConfig struct {
 	APIKey string
 }
 
+// ProcessingConfig holds processing service configuration
+type ProcessingConfig struct {
+	PythonCmd string
+}
+
 // Load loads configuration from environment variables and .env files
 func Load() (*Config, error) {
 	// Set defaults
@@ -53,6 +59,7 @@ func Load() (*Config, error) {
 	viper.SetDefault("S3_ENDPOINT", "http://localhost:9000")
 	viper.SetDefault("ALLOWED_ORIGINS", "http://localhost:5173,http://localhost:3000,https://sonara-frontend.up.railway.app")
 	viper.SetDefault("OPENAI_API_KEY", "")
+	viper.SetDefault("PYTHON_CMD", "python3")
 
 	// Read from .env files based on environment
 	env := viper.GetString("ENVIRONMENT")
@@ -82,6 +89,7 @@ func Load() (*Config, error) {
 	viper.BindEnv("S3_ENDPOINT")
 	viper.BindEnv("ALLOWED_ORIGINS")
 	viper.BindEnv("OPENAI_API_KEY")
+	viper.BindEnv("PYTHON_CMD")
 
 	var config Config
 	config.Database.URL = viper.GetString("DATABASE_URL")
@@ -94,6 +102,7 @@ func Load() (*Config, error) {
 	config.AWS.S3Bucket = viper.GetString("S3_BUCKET")
 	config.AWS.S3Endpoint = viper.GetString("S3_ENDPOINT")
 	config.OpenAI.APIKey = viper.GetString("OPENAI_API_KEY")
+	config.Processing.PythonCmd = viper.GetString("PYTHON_CMD")
 
 	return &config, nil
 }

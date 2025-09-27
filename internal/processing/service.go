@@ -25,13 +25,15 @@ type processingService struct {
 	s3         storage.S3Service
 	repository repository.AnalysisRepository
 	pythonPath string // Absolute path to "scripts/analyze_audio.py"
+	pythonCmd  string // Python command to use (from config)
 }
 
-func NewProcessingService(s3Service storage.S3Service, repo repository.AnalysisRepository, pythonPath string) ProcessingService {
+func NewProcessingService(s3Service storage.S3Service, repo repository.AnalysisRepository, pythonPath, pythonCmd string) ProcessingService {
 	return &processingService{
 		s3:         s3Service,
 		repository: repo,
 		pythonPath: pythonPath,
+		pythonCmd:  pythonCmd,
 	}
 }
 
@@ -126,12 +128,11 @@ func (s *processingService) ProcessAnalysis(ctx context.Context, analysisID uuid
 	resultFile := filepath.Join("/tmp", fmt.Sprintf("%s.result.json", analysisID))
 	defer os.Remove(resultFile) // GUARANTEED cleanup
 
-	// Use virtual environment python
-	pythonCmd := "/Users/rmahshie/Downloads/projects/sonara/scripts/venv/bin/python3"
-	log.Info().Str("analysisID", analysisID.String()).Str("pythonCmd", pythonCmd).Str("scriptPath", s.pythonPath).Str("wavFile", wavFile).Str("signalID", analysis.SignalID).Str("resultFile", resultFile).Msg("Starting Python script execution")
+	// Use configured python command
+	log.Info().Str("analysisID", analysisID.String()).Str("pythonCmd", s.pythonCmd).Str("scriptPath", s.pythonPath).Str("wavFile", wavFile).Str("signalID", analysis.SignalID).Str("resultFile", resultFile).Msg("Starting Python script execution")
 
 	// Pass signal ID and result file path to Python script
-	cmd := exec.CommandContext(ctx, pythonCmd, s.pythonPath, wavFile, analysis.SignalID, resultFile)
+	cmd := exec.CommandContext(ctx, s.pythonCmd, s.pythonPath, wavFile, analysis.SignalID, resultFile)
 
 	startTime := time.Now()
 	output, err := cmd.CombinedOutput()
