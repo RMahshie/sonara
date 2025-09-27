@@ -11,19 +11,29 @@ export interface AnalysisStatus {
   id: string
   status: 'pending' | 'processing' | 'completed' | 'failed'
   progress: number
-  filename: string
-  createdAt: string
-  completedAt?: string
+  message?: string
+  results_id?: string
 }
 
 export interface AnalysisResult {
   id: string
-  filename: string
-  duration: string
-  sampleRate: number
-  frequencies: Array<{ frequency: number; amplitude: number }>
-  createdAt: string
-  completedAt: string
+  frequency_data: Array<{ frequency: number; magnitude: number }>
+  rt60?: number
+  room_modes?: number[]
+  room_info?: any
+  created_at: string
+}
+
+export interface RoomInfoInput {
+  room_length?: number
+  room_width?: number
+  room_height?: number
+  room_size: string
+  ceiling_height: string
+  floor_type: string
+  features: string[]
+  speaker_placement: string
+  additional_notes: string
 }
 
 export const analysisService = {
@@ -70,10 +80,10 @@ export const analysisService = {
     return response.data
   },
 
-  // Get all analyses
-  getAnalyses: async (): Promise<AnalysisStatus[]> => {
-    const response = await api.get<AnalysisStatus[]>('/analyses')
-    return response.data
+  // Add room information to analysis
+  addRoomInfo: async (analysisId: string, roomInfo: RoomInfoInput): Promise<void> => {
+    await api.post(`/analyses/${analysisId}/room-info`, roomInfo)
   },
+
 }
 

@@ -82,6 +82,14 @@ func (s *processingService) ProcessAnalysis(ctx context.Context, analysisID uuid
 	}
 	defer os.Remove(tempFile) // Always cleanup
 
+	// Step 4.5: Convert WebM/OGG to WAV for Python compatibility
+	wavFile := filepath.Join("/tmp", fmt.Sprintf("%s.wav", analysisID))
+	convertCmd := exec.Command("ffmpeg", "-i", tempFile, "-acodec", "pcm_s16le", "-ar", "48000", "-y", wavFile)
+	if err := convertCmd.Run(); err != nil {
+		return fmt.Errorf("failed to convert audio to WAV: %w", err)
+	}
+	defer os.Remove(wavFile) // Cleanup WAV file
+
 	// Step 5: Run Python analysis with room data if available
 	if err := s.repository.UpdateStatus(ctx, analysisID, "processing", 50); err != nil {
 		return err
@@ -106,13 +114,13 @@ func (s *processingService) ProcessAnalysis(ctx context.Context, analysisID uuid
 		roomDataJSON, err := json.Marshal(roomData)
 		if err != nil {
 			// Fallback to analysis without room data
-			cmd = exec.CommandContext(ctx, pythonCmd, s.pythonPath, tempFile)
+			cmd = exec.CommandContext(ctx, pythonCmd, s.pythonPath, wavFile)
 		} else {
-			cmd = exec.CommandContext(ctx, pythonCmd, s.pythonPath, tempFile, string(roomDataJSON))
+			cmd = exec.CommandContext(ctx, pythonCmd, s.pythonPath, wavFile, string(roomDataJSON))
 		}
 	} else {
 		// No room data available, use original approach
-		cmd = exec.CommandContext(ctx, pythonCmd, s.pythonPath, tempFile)
+		cmd = exec.CommandContext(ctx, pythonCmd, s.pythonPath, wavFile)
 	}
 
 	output, err := cmd.CombinedOutput()

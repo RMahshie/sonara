@@ -220,7 +220,7 @@ class AudioAnalyzer:
             frequencies, magnitudes = self.perform_fft(audio, sample_rate)
 
             # Apply calibration
-            calibrated = self.apply_calibration(frequencies, magnitudes)
+            calibrated = magnitudes #self.apply_calibration(frequencies, magnitudes)
 
             # Calculate RT60 (placeholder for Week 1)
             rt60 = self.calculate_rt60(audio, sample_rate)

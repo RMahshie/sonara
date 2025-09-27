@@ -7,16 +7,36 @@ export const LiveRecorder: React.FC = () => {
   const [isRecording, setIsRecording] = useState(false)
   const [progress, setProgress] = useState(0)
   const [error, setError] = useState<string | null>(null)
-  const [phase, setPhase] = useState<'ready' | 'recording' | 'uploading' | 'processing'>('ready')
+  const [phase, setPhase] = useState<'ready' | 'room-input' | 'recording' | 'processing'>('ready')
+  const [roomDimensions, setRoomDimensions] = useState({
+    length: '',
+    width: '',
+    height: ''
+  })
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const navigate = useNavigate()
 
-  const startAnalysis = useCallback(async () => {
-    setError(null)
-    setPhase('recording')
+  // Form validation for room dimensions
+  const isRoomFormValid = () => {
+    // All empty = valid (skip room analysis)
+    if (!roomDimensions.length && !roomDimensions.width && !roomDimensions.height) {
+      return true
+    }
+    // All filled with valid numbers = valid
+    return [roomDimensions.length, roomDimensions.width, roomDimensions.height]
+      .every(dim => dim === '' || (parseFloat(dim) > 0 && parseFloat(dim) < 50))
+  }
 
+  // Go to room input phase
+  const handleAnalyzeRoom = useCallback(() => {
+    setError(null)
+    setPhase('room-input')
+  }, [])
+
+  // Start recording logic (shared between entry points)
+  const startRecording = useCallback(async () => {
     try {
       // Request microphone access
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -93,7 +113,7 @@ export const LiveRecorder: React.FC = () => {
       testSignal.onended = () => {
         mediaRecorder.stop()
         setIsRecording(false)
-        setPhase('uploading')
+        setPhase('processing')
       }
 
       // Start recording then play test signal
@@ -118,6 +138,14 @@ export const LiveRecorder: React.FC = () => {
     }
   }, [navigate])
 
+
+  // Entry point from room dimensions form
+  const startRecordingWithRoomInfo = useCallback(() => {
+    setError(null)
+    setPhase('recording')
+    startRecording()
+  }, [startRecording])
+
   const uploadRecording = async (audioBlob: Blob, mimeType: string) => {
     try {
       // Get or create session ID
@@ -133,15 +161,34 @@ export const LiveRecorder: React.FC = () => {
       // Phase 1: Create analysis and get upload URL
       const { id: analysisId, upload_url: uploadUrl } = await analysisService.createAnalysis(sessionId, file)
 
-      // Phase 2: Upload to S3 with progress (0-30% of total progress)
+      // Send room dimensions if provided
+      if (roomDimensions.length || roomDimensions.width || roomDimensions.height) {
+        try {
+          await analysisService.addRoomInfo(analysisId, {
+            room_length: roomDimensions.length ? parseFloat(roomDimensions.length) : undefined,
+            room_width: roomDimensions.width ? parseFloat(roomDimensions.width) : undefined,
+            room_height: roomDimensions.height ? parseFloat(roomDimensions.height) : undefined,
+            room_size: 'medium', // Default values for required fields
+            ceiling_height: 'standard',
+            floor_type: 'hardwood',
+            features: [],
+            speaker_placement: 'desk',
+            additional_notes: ''
+          })
+        } catch (err: any) {
+          console.warn('Failed to save room info, continuing with analysis:', err)
+          // Don't block the analysis if room info fails
+        }
+      }
+
+      // Upload to S3 with progress (0-50% of total progress)
       await analysisService.uploadToS3(uploadUrl, file, (uploadProgress) => {
-        const totalProgress = Math.round(uploadProgress * 0.3) // 30% of total
+        const totalProgress = Math.round(uploadProgress * 0.5) // 50% of total
         setProgress(totalProgress)
       })
 
-      // Phase 3: Start processing (switch to processing phase)
-      setPhase('processing')
-      setProgress(30) // Start processing phase at 30%
+      // Start backend processing
+      setProgress(50) // Start processing phase at 50%
 
       await analysisService.startProcessing(analysisId)
 
@@ -193,12 +240,96 @@ export const LiveRecorder: React.FC = () => {
                 Click to analyze your room acoustics
               </p>
               <button
-                onClick={startAnalysis}
+                onClick={handleAnalyzeRoom}
                 className="btn-primary mt-4"
                 disabled={isRecording || phase !== 'ready'}
               >
                 Analyze Room
               </button>
+            </div>
+          </div>
+        )}
+
+        {phase === 'room-input' && (
+          <div className="space-y-4">
+            <div className="text-6xl text-racing-green/40">📏</div>
+            <div>
+              <p className="text-xl font-medium text-racing-green mb-2">
+                Room Dimensions (Optional)
+              </p>
+              <p className="text-racing-green/60 mb-4">
+                Enter your room dimensions for enhanced resonance analysis
+              </p>
+
+              {/* Form fields */}
+              <div className="space-y-3 mb-6">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-sm text-racing-green/70 mb-1">
+                      Length (m)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="0.1"
+                      max="50"
+                      placeholder="e.g. 4.5"
+                      className="w-full px-3 py-2 border border-racing-green/30 rounded-md focus:outline-none focus:ring-2 focus:ring-racing-green/50"
+                      value={roomDimensions.length}
+                      onChange={(e) => setRoomDimensions(prev => ({...prev, length: e.target.value}))}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm text-racing-green/70 mb-1">
+                      Width (m)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="0.1"
+                      max="50"
+                      placeholder="e.g. 3.2"
+                      className="w-full px-3 py-2 border border-racing-green/30 rounded-md focus:outline-none focus:ring-2 focus:ring-racing-green/50"
+                      value={roomDimensions.width}
+                      onChange={(e) => setRoomDimensions(prev => ({...prev, width: e.target.value}))}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm text-racing-green/70 mb-1">
+                      Height (m)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="0.1"
+                      max="10"
+                      placeholder="e.g. 2.4"
+                      className="w-full px-3 py-2 border border-racing-green/30 rounded-md focus:outline-none focus:ring-2 focus:ring-racing-green/50"
+                      value={roomDimensions.height}
+                      onChange={(e) => setRoomDimensions(prev => ({...prev, height: e.target.value}))}
+                    />
+                  </div>
+                </div>
+                <p className="text-xs text-racing-green/50">
+                  Leave blank to skip enhanced analysis
+                </p>
+              </div>
+
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setPhase('ready')}
+                  className="px-4 py-2 text-racing-green/70 hover:text-racing-green border border-racing-green/30 rounded-md transition-colors"
+                >
+                  Back
+                </button>
+                <button
+                  onClick={startRecordingWithRoomInfo}
+                  className="btn-primary flex-1"
+                  disabled={!isRoomFormValid()}
+                >
+                  Start Analysis
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -222,17 +353,15 @@ export const LiveRecorder: React.FC = () => {
           </div>
         )}
 
-        {(phase === 'uploading' || phase === 'processing') && (
+        {phase === 'processing' && (
           <div className="space-y-4">
             <div className="text-6xl text-racing-green/40">⏳</div>
             <div className="text-racing-green font-medium">
-              {phase === 'uploading' ? 'Uploading recording...' : 'Analyzing your recording...'}
+              Processing your recording...
             </div>
             <ProgressBar progress={progress} />
             <p className="text-sm text-racing-green/60">
-              {phase === 'uploading'
-                ? 'Sending audio to storage...'
-                : 'Processing frequency analysis and room characteristics'}
+              Analyzing frequency response and room characteristics...
             </p>
           </div>
         )}

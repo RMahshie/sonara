@@ -45,13 +45,13 @@ func Load() (*Config, error) {
 	// Set defaults
 	viper.SetDefault("DATABASE_URL", "postgres://sonara:localdev@localhost:5432/sonara_dev?sslmode=disable")
 	viper.SetDefault("PORT", "8080")
-	viper.SetDefault("ENVIRONMENT", "development")
+	viper.SetDefault("ENVIRONMENT", "dev")
 	viper.SetDefault("AWS_REGION", "us-east-1")
 	viper.SetDefault("AWS_ACCESS_KEY_ID", "")
 	viper.SetDefault("AWS_SECRET_ACCESS_KEY", "")
-	viper.SetDefault("S3_BUCKET", "sonara-dev-audio")
+	viper.SetDefault("S3_BUCKET", "sonara-audio")
 	viper.SetDefault("S3_ENDPOINT", "http://localhost:9000")
-	viper.SetDefault("ALLOWED_ORIGINS", "http://localhost:5173,http://localhost:3000")
+	viper.SetDefault("ALLOWED_ORIGINS", "http://localhost:5173,http://localhost:3000,https://sonara-frontend.up.railway.app")
 	viper.SetDefault("OPENAI_API_KEY", "")
 
 	// Read from .env files based on environment

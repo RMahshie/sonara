@@ -1,22 +1,66 @@
 import { useParams } from 'react-router-dom'
+import { useState, useEffect } from 'react'
 import FrequencyChart from './FrequencyChart'
+import { analysisService } from '../services/analysisService'
 
 const Results = () => {
   const { id } = useParams<{ id: string }>()
+  const [result, setResult] = useState<any>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
-  // Mock data - this will come from the API
-  const mockData = {
-    filename: 'sample_audio.wav',
-    duration: '3:24',
-    sampleRate: 44100,
-    frequencies: [
-      { frequency: 100, amplitude: 0.8 },
-      { frequency: 200, amplitude: 0.6 },
-      { frequency: 500, amplitude: 0.9 },
-      { frequency: 1000, amplitude: 0.7 },
-      { frequency: 2000, amplitude: 0.5 },
-      { frequency: 5000, amplitude: 0.3 },
-    ]
+  useEffect(() => {
+    const fetchResults = async () => {
+      try {
+        const data = await analysisService.getAnalysisResults(id!)
+        setResult(data)
+      } catch (err: any) {
+        setError(err.message || 'Failed to load results')
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    if (id) {
+      fetchResults()
+    }
+  }, [id])
+
+  if (loading) {
+    return (
+      <div className="max-w-6xl mx-auto">
+        <div className="text-center mb-8">
+          <h1 className="text-3xl font-display font-bold text-racing-green mb-4">
+            Loading Results...
+          </h1>
+        </div>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="max-w-6xl mx-auto">
+        <div className="text-center mb-8">
+          <h1 className="text-3xl font-display font-bold text-racing-green mb-4">
+            Error Loading Results
+          </h1>
+          <p className="text-red-600">{error}</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (!result) {
+    return (
+      <div className="max-w-6xl mx-auto">
+        <div className="text-center mb-8">
+          <h1 className="text-3xl font-display font-bold text-racing-green mb-4">
+            No Results Found
+          </h1>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -32,17 +76,20 @@ const Results = () => {
 
       <div className="grid md:grid-cols-3 gap-6 mb-8">
         <div className="bg-white/70 backdrop-blur-sm rounded-xl p-6 shadow-lg">
-          <h3 className="font-semibold text-racing-green mb-2">File Info</h3>
+          <h3 className="font-semibold text-racing-green mb-2">Analysis Info</h3>
           <div className="space-y-2 text-sm">
-            <p><span className="font-medium">Filename:</span> {mockData.filename}</p>
-            <p><span className="font-medium">Duration:</span> {mockData.duration}</p>
-            <p><span className="font-medium">Sample Rate:</span> {mockData.sampleRate} Hz</p>
+            <p><span className="font-medium">Analysis ID:</span> {result.id}</p>
+            {result.rt60 && <p><span className="font-medium">RT60:</span> {result.rt60.toFixed(2)}s</p>}
+            {result.room_modes && result.room_modes.length > 0 && (
+              <p><span className="font-medium">Room Modes:</span> {result.room_modes.map((mode: number) => mode.toFixed(0)).join(', ')} Hz</p>
+            )}
+            <p><span className="font-medium">Created:</span> {new Date(result.created_at).toLocaleString()}</p>
           </div>
         </div>
 
         <div className="bg-white/70 backdrop-blur-sm rounded-xl p-6 shadow-lg md:col-span-2">
-          <h3 className="font-semibold text-racing-green mb-4">Frequency Analysis</h3>
-          <FrequencyChart data={mockData.frequencies} />
+          <h3 className="font-semibold text-racing-green mb-4">Frequency Response</h3>
+          <FrequencyChart data={result.frequency_data || []} />
         </div>
       </div>
 

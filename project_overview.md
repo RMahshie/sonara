@@ -157,7 +157,7 @@ func main() {
 type CreateAnalysisInput struct {
     SessionID string `json:"session_id" minLength:"10" maxLength:"50" required:"true"`
     FileSize  int64  `json:"file_size" minimum:"1000" maximum:"20971520" required:"true"`
-    MimeType  string `json:"mime_type" enum:"audio/wav,audio/mpeg,audio/flac" required:"true"`
+    MimeType  string `json:"mime_type" enum:"audio/wav,audio/mpeg,audio/flac,audio/webm,audio/ogg" required:"true"`
 }
 
 type CreateAnalysisOutput struct {
@@ -205,6 +205,9 @@ type FrequencyPoint struct {
 ### POST /api/analyses/{id}/room-info - Add Room Description
 ```go
 type RoomInfoInput struct {
+    RoomLength       *float64 `json:"room_length,omitempty" doc:"Room length in meters for resonance analysis"`
+    RoomWidth        *float64 `json:"room_width,omitempty" doc:"Room width in meters for resonance analysis"`
+    RoomHeight       *float64 `json:"room_height,omitempty" doc:"Room height in meters for resonance analysis"`
     RoomSize         string   `json:"room_size" enum:"small,medium,large,very_large"`
     CeilingHeight    string   `json:"ceiling_height" enum:"standard,high,vaulted"`
     FloorType        string   `json:"floor_type" enum:"carpet,hardwood,tile,rug_on_hard"`
@@ -595,10 +598,18 @@ func (s *processingService) ProcessAnalysis(ctx context.Context, analysisID uuid
         return err
     }
     defer os.Remove(tempFile)  // Always cleanup
-    
+
+    // Step 4.5: Convert WebM/OGG to WAV for Python compatibility
+    wavFile := filepath.Join("/tmp", fmt.Sprintf("%s.wav", analysisID))
+    convertCmd := exec.Command("ffmpeg", "-i", tempFile, "-acodec", "pcm_s16le", "-ar", "48000", "-y", wavFile)
+    if err := convertCmd.Run(); err != nil {
+        return fmt.Errorf("failed to convert audio to WAV: %w", err)
+    }
+    defer os.Remove(wavFile) // Cleanup WAV file
+
     // Step 5: Run Python analysis
     s.repository.UpdateStatus(ctx, analysisID, "processing", 50)
-    cmd := exec.CommandContext(ctx, "python3", s.pythonPath, tempFile)
+    cmd := exec.CommandContext(ctx, "python3", s.pythonPath, wavFile)
     output, err := cmd.Output()
     if err != nil {
         s.repository.UpdateError(ctx, analysisID, "Audio analysis failed")
@@ -645,50 +656,145 @@ func (s *processingService) ProcessAnalysis(ctx context.Context, analysisID uuid
 
 ## React Components
 
-### File Upload Component
+### Live Recorder Component
 ```tsx
-// web/src/components/FileUpload.tsx
-import React, { useState, useCallback } from 'react';
-import { useDropzone } from 'react-dropzone';
-import axios from 'axios';
+// web/src/components/LiveRecorder.tsx
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { analysisService } from '../services/analysisService';
+import ProgressBar from './ProgressBar';
 
-interface FileUploadProps {
-    onUploadStart?: (analysisId: string) => void;
-}
-
-export const FileUpload: React.FC<FileUploadProps> = ({ onUploadStart }) => {
-    const [uploading, setUploading] = useState(false);
+export const LiveRecorder: React.FC = () => {
+    const [isRecording, setIsRecording] = useState(false);
     const [progress, setProgress] = useState(0);
     const [error, setError] = useState<string | null>(null);
+    const [phase, setPhase] = useState<'ready' | 'room-input' | 'recording' | 'processing'>('ready');
+    const [roomDimensions, setRoomDimensions] = useState({
+        length: '',
+        width: '',
+        height: ''
+    });
+
+    const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+    const streamRef = useRef<MediaStream | null>(null);
     const navigate = useNavigate();
-    
-    const validateFile = (file: File): string | null => {
-        const validTypes = ['audio/wav', 'audio/mpeg', 'audio/mp3', 'audio/flac', 'audio/x-flac'];
-        const validExtensions = ['.wav', '.mp3', '.flac'];
-        
-        // Check MIME type
-        if (!validTypes.includes(file.type)) {
-            // Also check extension as fallback
-            const ext = file.name.toLowerCase().slice(file.name.lastIndexOf('.'));
-            if (!validExtensions.includes(ext)) {
-                return 'Please upload a WAV, MP3, or FLAC file';
-            }
+
+    // Form validation for room dimensions
+    const isRoomFormValid = () => {
+        // All empty = valid (skip room analysis)
+        if (!roomDimensions.length && !roomDimensions.width && !roomDimensions.height) {
+            return true;
         }
-        
-        // Check file size (20MB max)
-        if (file.size > 20 * 1024 * 1024) {
-            return 'File size must be less than 20MB';
-        }
-        
-        return null;
+        // All filled with valid numbers = valid
+        return [roomDimensions.length, roomDimensions.width, roomDimensions.height]
+            .every(dim => dim === '' || (parseFloat(dim) > 0 && parseFloat(dim) < 50));
     };
-    
-    const uploadFile = async (file: File) => {
-        setUploading(true);
+
+    // Entry point for room dimensions collection
+    const handleAnalyzeRoom = useCallback(() => {
         setError(null);
-        setProgress(0);
-        
+        setPhase('room-input');
+    }, []);
+
+    // Start recording with optional room data
+    const startRecordingWithRoomInfo = useCallback(() => {
+        setError(null);
+        setPhase('recording');
+        startRecording();
+    }, []);
+
+    // Core recording logic (shared between entry points)
+    const startRecording = useCallback(async () => {
+        try {
+            // Request microphone access with optimized settings
+            const stream = await navigator.mediaDevices.getUserMedia({
+                audio: {
+                    echoCancellation: false,
+                    noiseSuppression: false,
+                    autoGainControl: false,
+                    sampleRate: 48000
+                }
+            });
+            streamRef.current = stream;
+
+            // Setup MediaRecorder for WebM/OGG output
+            const mimeType = MediaRecorder.isTypeSupported('audio/webm')
+                ? 'audio/webm'
+                : 'audio/ogg';
+
+            const mediaRecorder = new MediaRecorder(stream, { mimeType });
+            mediaRecorderRef.current = mediaRecorder;
+
+            const chunks: Blob[] = [];
+
+            mediaRecorder.ondataavailable = (event) => {
+                if (event.data.size > 0) {
+                    chunks.push(event.data);
+                }
+            };
+
+            mediaRecorder.onstop = async () => {
+                const audioBlob = new Blob(chunks, { type: mimeType });
+
+                // Validate recording quality
+                if (audioBlob.size < 1000) {
+                    setError('Recording failed. Please check your microphone.');
+                    setPhase('ready');
+                    stream.getTracks().forEach(track => track.stop());
+                    return;
+                }
+
+                await uploadRecording(audioBlob, mimeType);
+                stream.getTracks().forEach(track => track.stop());
+            };
+
+            // Play pink noise test signal simultaneously with recording
+            const testSignal = new Audio('/test-signals/pink-noise-10s.wav');
+            testSignal.volume = 1.0;
+
+            testSignal.onerror = () => {
+                setError('Test signal failed to load. Please check your setup.');
+                setPhase('ready');
+                setIsRecording(false);
+                mediaRecorder.stop();
+                stream.getTracks().forEach(track => track.stop());
+                return;
+            };
+
+            testSignal.ontimeupdate = () => {
+                const currentProgress = (testSignal.currentTime / testSignal.duration) * 100;
+                setProgress(Math.round(currentProgress));
+            };
+
+            testSignal.onended = () => {
+                mediaRecorder.stop();
+                setIsRecording(false);
+                setPhase('processing'); // Direct to processing (single screen)
+            };
+
+            // Start recording then play test signal
+            mediaRecorder.start();
+            setIsRecording(true);
+
+            try {
+                await testSignal.play();
+            } catch (playError) {
+                setError('Cannot play test signal. Check audio permissions.');
+                setPhase('ready');
+                setIsRecording(false);
+                mediaRecorder.stop();
+                stream.getTracks().forEach(track => track.stop());
+                return;
+            }
+
+        } catch (err: any) {
+            setError(err.message || 'Failed to access microphone. Please check permissions.');
+            setPhase('ready');
+            setIsRecording(false);
+        }
+    }, [navigate]);
+
+    const uploadRecording = async (audioBlob: Blob, mimeType: string) => {
         try {
             // Get or create session ID
             let sessionId = localStorage.getItem('sonara_session_id');
@@ -696,123 +802,244 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onUploadStart }) => {
                 sessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
                 localStorage.setItem('sonara_session_id', sessionId);
             }
-            
-            // Step 1: Create analysis and get upload URL
-            const createResponse = await axios.post('/api/analyses', {
-                session_id: sessionId,
-                file_size: file.size,
-                mime_type: file.type || 'audio/wav'
-            });
-            
-            const { id: analysisId, upload_url } = createResponse.data;
-            
-            // Step 2: Upload directly to S3
-            await axios.put(upload_url, file, {
-                headers: {
-                    'Content-Type': file.type || 'audio/wav'
-                },
-                onUploadProgress: (progressEvent) => {
-                    const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total!);
-                    setProgress(percent);
+
+            // Convert blob to file for the service
+            const file = new File([audioBlob], 'recording', { type: mimeType });
+
+            // Create analysis and get upload URL
+            const { id: analysisId, upload_url: uploadUrl } = await analysisService.createAnalysis(sessionId, file);
+
+            // Send room dimensions if provided
+            if (roomDimensions.length || roomDimensions.width || roomDimensions.height) {
+                try {
+                    await analysisService.addRoomInfo(analysisId, {
+                        room_length: roomDimensions.length ? parseFloat(roomDimensions.length) : undefined,
+                        room_width: roomDimensions.width ? parseFloat(roomDimensions.width) : undefined,
+                        room_height: roomDimensions.height ? parseFloat(roomDimensions.height) : undefined,
+                        room_size: 'medium', // Default values for required fields
+                        ceiling_height: 'standard',
+                        floor_type: 'hardwood',
+                        features: [],
+                        speaker_placement: 'desk',
+                        additional_notes: ''
+                    });
+                } catch (err: any) {
+                    console.warn('Failed to save room info, continuing with analysis:', err);
+                    // Don't block the analysis if room info fails
                 }
-            });
-            
-            // Step 3: Navigate to analysis page
-            if (onUploadStart) {
-                onUploadStart(analysisId);
             }
+
+            // Upload to S3 with progress tracking
+            await analysisService.uploadToS3(uploadUrl, file, (uploadProgress) => {
+                // Upload progress contributes to overall progress
+                const totalProgress = Math.round(uploadProgress * 0.5);
+                setProgress(totalProgress);
+            });
+
+            // Start backend processing
+            setProgress(50); // Jump to processing phase
+
+            await analysisService.startProcessing(analysisId);
+
+            // Navigate to analysis page (processing continues in background)
             navigate(`/analysis/${analysisId}`);
-            
-        } catch (err) {
-            console.error('Upload error:', err);
-            setError('Upload failed. Please try again.');
-        } finally {
-            setUploading(false);
+
+        } catch (err: any) {
+            // Use backend-provided error messages when available
+            if (err.response?.data?.message) {
+                setError(err.response.data.message);
+            } else if (err.response?.status === 413) {
+                setError('Recording file is too large for upload.');
+            } else if (!navigator.onLine) {
+                setError('No internet connection. Please check your network.');
+            } else {
+                setError('Upload failed. Please try again.');
+            }
+            setPhase('ready');
         }
     };
-    
-    const onDrop = useCallback((acceptedFiles: File[]) => {
-        if (acceptedFiles.length === 0) return;
-        
-        const file = acceptedFiles[0];
-        const validationError = validateFile(file);
-        
-        if (validationError) {
-            setError(validationError);
-            return;
+
+    const stopAnalysis = useCallback(() => {
+        if (mediaRecorderRef.current && isRecording) {
+            mediaRecorderRef.current.stop();
+            setIsRecording(false);
         }
-        
-        uploadFile(file);
-    }, []);
-    
-    const { getRootProps, getInputProps, isDragActive } = useDropzone({
-        onDrop,
-        accept: {
-            'audio/*': ['.wav', '.mp3', '.flac']
-        },
-        maxFiles: 1,
-        disabled: uploading
-    });
-    
+        if (streamRef.current) {
+            streamRef.current.getTracks().forEach(track => track.stop());
+        }
+    }, [isRecording]);
+
     return (
-        <div className="w-full max-w-xl mx-auto">
+        <div className="w-full">
             <div
-                {...getRootProps()}
                 className={`
-                    border-2 border-dashed rounded-lg p-8 text-center cursor-pointer
-                    transition-all duration-200
-                    ${isDragActive ? 'border-racing-green bg-cream/20' : 'border-gray-300'}
-                    ${uploading ? 'opacity-50 cursor-not-allowed' : 'hover:border-racing-green'}
+                    border-2 border-dashed rounded-xl p-12 text-center transition-all duration-200
+                    ${error ? 'border-red-300 bg-red-50' : 'border-racing-green/30 hover:border-racing-green/60'}
+                    ${isRecording ? 'pointer-events-none opacity-50' : ''}
                 `}
             >
-                <input {...getInputProps()} />
-                
-                {!uploading && (
-                    <>
-                        <svg 
-                            className="mx-auto h-12 w-12 text-gray-400 mb-4" 
-                            fill="none" 
-                            viewBox="0 0 24 24" 
-                            stroke="currentColor"
-                        >
-                            <path 
-                                strokeLinecap="round" 
-                                strokeLinejoin="round" 
-                                strokeWidth={2} 
-                                d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" 
-                            />
-                        </svg>
-                        <p className="text-lg font-medium text-gray-700">
-                            {isDragActive ? 'Drop your audio file here' : 'Drag & drop your audio file'}
-                        </p>
-                        <p className="text-sm text-gray-500 mt-2">
-                            or click to browse
-                        </p>
-                        <p className="text-xs text-gray-400 mt-2">
-                            WAV, MP3, or FLAC • Max 20MB
-                        </p>
-                    </>
-                )}
-                
-                {uploading && (
+                {phase === 'ready' && !isRecording && (
                     <div className="space-y-4">
-                        <p className="text-sm font-medium">Uploading...</p>
-                        <div className="w-full bg-gray-200 rounded-full h-2">
-                            <div
-                                className="bg-racing-green h-2 rounded-full transition-all duration-300"
-                                style={{ width: `${progress}%` }}
-                            />
+                        <div className="text-6xl text-racing-green/40">🎤</div>
+                        <div>
+                            <p className="text-xl font-medium text-racing-green mb-2">
+                                Room Acoustic Analysis
+                            </p>
+                            <p className="text-racing-green/60 mb-4">
+                                Click to analyze your room acoustics
+                            </p>
+                            <button
+                                onClick={handleAnalyzeRoom}
+                                className="btn-primary mt-4"
+                                disabled={isRecording || phase !== 'ready'}
+                            >
+                                Analyze Room
+                            </button>
                         </div>
-                        <p className="text-sm text-gray-600">{progress}%</p>
+                    </div>
+                )}
+
+                {phase === 'room-input' && (
+                    <div className="space-y-4">
+                        <div className="text-6xl text-racing-green/40">📏</div>
+                        <div>
+                            <p className="text-xl font-medium text-racing-green mb-2">
+                                Room Dimensions (Optional)
+                            </p>
+                            <p className="text-racing-green/60 mb-4">
+                                Enter your room dimensions for enhanced resonance analysis
+                            </p>
+
+                            <div className="space-y-3 mb-6">
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                    <div>
+                                        <label className="block text-sm text-racing-green/70 mb-1">
+                                            Length (m)
+                                        </label>
+                                        <input
+                                            type="number"
+                                            step="0.1"
+                                            min="0.1"
+                                            max="50"
+                                            placeholder="e.g. 4.5"
+                                            className="w-full px-3 py-2 border border-racing-green/30 rounded-md focus:outline-none focus:ring-2 focus:ring-racing-green/50"
+                                            value={roomDimensions.length}
+                                            onChange={(e) => setRoomDimensions(prev => ({...prev, length: e.target.value}))}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm text-racing-green/70 mb-1">
+                                            Width (m)
+                                        </label>
+                                        <input
+                                            type="number"
+                                            step="0.1"
+                                            min="0.1"
+                                            max="50"
+                                            placeholder="e.g. 3.2"
+                                            className="w-full px-3 py-2 border border-racing-green/30 rounded-md focus:outline-none focus:ring-2 focus:ring-racing-green/50"
+                                            value={roomDimensions.width}
+                                            onChange={(e) => setRoomDimensions(prev => ({...prev, width: e.target.value}))}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm text-racing-green/70 mb-1">
+                                            Height (m)
+                                        </label>
+                                        <input
+                                            type="number"
+                                            step="0.1"
+                                            min="0.1"
+                                            max="10"
+                                            placeholder="e.g. 2.4"
+                                            className="w-full px-3 py-2 border border-racing-green/30 rounded-md focus:outline-none focus:ring-2 focus:ring-racing-green/50"
+                                            value={roomDimensions.height}
+                                            onChange={(e) => setRoomDimensions(prev => ({...prev, height: e.target.value}))}
+                                        />
+                                    </div>
+                                </div>
+                                <p className="text-xs text-racing-green/50">
+                                    Leave blank to skip enhanced analysis
+                                </p>
+                            </div>
+
+                            <div className="flex gap-3">
+                                <button
+                                    onClick={() => setPhase('ready')}
+                                    className="px-4 py-2 text-racing-green/70 hover:text-racing-green border border-racing-green/30 rounded-md transition-colors"
+                                >
+                                    Back
+                                </button>
+                                <button
+                                    onClick={startRecordingWithRoomInfo}
+                                    className="btn-primary flex-1"
+                                    disabled={!isRoomFormValid()}
+                                >
+                                    Start Analysis
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {phase === 'recording' && isRecording && (
+                    <div className="space-y-4">
+                        <div className="text-6xl text-racing-green/40 animate-pulse">🔴</div>
+                        <div className="text-racing-green font-medium">
+                            Recording in progress...
+                        </div>
+                        <ProgressBar progress={progress} />
+                        <p className="text-sm text-racing-green/60">
+                            Please remain quiet during the measurement
+                        </p>
+                        <button
+                            onClick={stopAnalysis}
+                            className="text-red-600 hover:text-red-700 text-sm"
+                        >
+                            Cancel Recording
+                        </button>
+                    </div>
+                )}
+
+                {phase === 'processing' && (
+                    <div className="space-y-4">
+                        <div className="text-6xl text-racing-green/40">⏳</div>
+                        <div className="text-racing-green font-medium">
+                            Processing your recording...
+                        </div>
+                        <ProgressBar progress={progress} />
+                        <p className="text-sm text-racing-green/60">
+                            Analyzing frequency response and room characteristics...
+                        </p>
+                    </div>
+                )}
+
+                {error && (
+                    <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+                        <p className="text-red-600 text-sm">{error}</p>
+                        <button
+                            onClick={() => {
+                                setError(null);
+                                setPhase('ready');
+                            }}
+                            className="mt-2 text-red-600 hover:text-red-700 text-sm underline"
+                        >
+                            Try Again
+                        </button>
+                    </div>
+                )}
+
+                {phase === 'ready' && !error && (
+                    <div className="mt-8 text-xs text-racing-green/60 max-w-md mx-auto">
+                        <p className="mb-2 font-medium text-base">Quick Setup:</p>
+                        <ul className="space-y-1">
+                            <li>• Set speakers to normal listening volume</li>
+                            <li>• Position microphone at listening position</li>
+                            <li>• Minimize background noise</li>
+                        </ul>
                     </div>
                 )}
             </div>
-            
-            {error && (
-                <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-md">
-                    <p className="text-sm text-red-600">{error}</p>
-                </div>
-            )}
         </div>
     );
 };
@@ -822,7 +1049,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onUploadStart }) => {
 ```tsx
 // web/src/hooks/useAnalysisStatus.ts
 import { useState, useEffect, useCallback } from 'react';
-import axios from 'axios';
+import { api } from '../services/api';
 
 interface AnalysisStatus {
     id: string;
@@ -841,7 +1068,7 @@ export function useAnalysisStatus(analysisId: string | null) {
         if (!analysisId) return;
         
         try {
-            const response = await axios.get(`/api/analyses/${analysisId}/status`);
+            const response = await api.get(`/analyses/${analysisId}/status`);
             setStatus(response.data);
             
             // Stop polling if completed or failed
@@ -881,91 +1108,233 @@ export function useAnalysisStatus(analysisId: string | null) {
 ### Frequency Response Chart
 ```tsx
 // web/src/components/FrequencyChart.tsx
-import React from 'react';
-import {
-    LineChart,
-    Line,
-    XAxis,
-    YAxis,
-    CartesianGrid,
-    Tooltip,
-    Legend,
-    ResponsiveContainer
-} from 'recharts';
-
-interface FrequencyPoint {
+interface FrequencyData {
     frequency: number;
     magnitude: number;
 }
 
 interface FrequencyChartProps {
-    data: FrequencyPoint[];
-    width?: number | string;
-    height?: number;
+    data: FrequencyData[];
 }
 
-export const FrequencyChart: React.FC<FrequencyChartProps> = ({ 
-    data, 
-    width = '100%', 
-    height = 400 
-}) => {
-    // Format data for Recharts
-    const chartData = data.map(point => ({
-        freq: point.frequency,
-        db: point.magnitude
-    }));
-    
-    // Custom tick formatter for frequency axis
-    const formatFrequency = (value: number) => {
-        if (value >= 1000) {
-            return `${(value / 1000).toFixed(0)}k`;
-        }
-        return value.toString();
+const FrequencyChart = ({ data }: FrequencyChartProps) => {
+    // Chart dimensions
+    const width = 800;
+    const height = 400;
+    const padding = 60;
+
+    // Fixed ranges for professional audio visualization
+    const FREQ_MIN = 20;
+    const FREQ_MAX = 20000;
+    const DB_MIN = -15;
+    const DB_MAX = 15;
+
+    // Scaling functions
+    const xScale = (freq: number) => {
+        const logFreq = Math.log10(Math.max(FREQ_MIN, Math.min(FREQ_MAX, freq)));
+        const logMin = Math.log10(FREQ_MIN);
+        const logMax = Math.log10(FREQ_MAX);
+        return padding + ((logFreq - logMin) / (logMax - logMin)) * (width - 2 * padding);
     };
-    
+
+    const yScale = (db: number) => {
+        const clampedDb = Math.max(DB_MIN, Math.min(DB_MAX, db));
+        return height - padding - ((clampedDb - DB_MIN) / (DB_MAX - DB_MIN)) * (height - 2 * padding);
+    };
+
+    // Generate tick marks
+    const generateFrequencyTicks = (): Array<{ x: number; label: string; freq: number }> => {
+        const ticks: Array<{ x: number; label: string; freq: number }> = [];
+        const frequencies = [20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000];
+
+        frequencies.forEach(freq => {
+            if (freq >= FREQ_MIN && freq <= FREQ_MAX) {
+                const x = xScale(freq);
+                const label = freq >= 1000 ? `${(freq / 1000).toFixed(0)}k` : freq.toString();
+                ticks.push({ x, label, freq });
+            }
+        });
+
+        return ticks;
+    };
+
+    const generateDbTicks = (): Array<{ y: number; label: string; db: number }> => {
+        const ticks: Array<{ y: number; label: string; db: number }> = [];
+        const dbValues = [-15, -10, -5, 0, 5, 10, 15];
+
+        dbValues.forEach(db => {
+            const y = yScale(db);
+            ticks.push({ y, label: db.toString(), db });
+        });
+
+        return ticks;
+    };
+
+    // Prepare data for rendering
+    const filteredData = data
+        .filter(d => d.frequency >= FREQ_MIN && d.frequency <= FREQ_MAX && !isNaN(d.magnitude))
+        .sort((a, b) => a.frequency - b.frequency);
+
+    // Generate smooth curve path
+    const generatePath = () => {
+        if (filteredData.length === 0) return '';
+
+        let path = `M ${xScale(filteredData[0].frequency)} ${yScale(filteredData[0].magnitude)}`;
+
+        for (let i = 1; i < filteredData.length; i++) {
+            path += ` L ${xScale(filteredData[i].frequency)} ${yScale(filteredData[i].magnitude)}`;
+        }
+
+        return path;
+    };
+
+    const freqTicks = generateFrequencyTicks();
+    const dbTicks = generateDbTicks();
+
     return (
-        <ResponsiveContainer width={width} height={height}>
-            <LineChart 
-                data={chartData}
-                margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
-            >
-                <CartesianGrid strokeDasharray="3 3" stroke="#e7e5e4" />
-                <XAxis 
-                    dataKey="freq"
-                    scale="log"
-                    domain={[20, 20000]}
-                    ticks={[20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000]}
-                    tickFormatter={formatFrequency}
-                    label={{ value: 'Frequency (Hz)', position: 'insideBottom', offset: -5 }}
-                    stroke="#1c1917"
-                />
-                <YAxis 
-                    domain={[-30, 10]}
-                    label={{ value: 'Magnitude (dB)', angle: -90, position: 'insideLeft' }}
-                    stroke="#1c1917"
-                />
-                <Tooltip 
-                    formatter={(value: number) => `${value.toFixed(1)} dB`}
-                    labelFormatter={(value: number) => `${value.toFixed(0)} Hz`}
-                    contentStyle={{ 
-                        backgroundColor: '#fafaf9',
-                        border: '2px solid #004225',
-                        borderRadius: '4px'
-                    }}
-                />
-                <Legend />
-                <Line 
-                    type="monotone" 
-                    dataKey="db" 
+        <div className="w-full overflow-x-auto">
+            <svg width={width} height={height} className="border border-racing-green/20 rounded-lg bg-white">
+                {/* Grid lines */}
+                <defs>
+                    <pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse">
+                        <path d="M 20 0 L 0 0 0 20" fill="none" stroke="#004225" strokeWidth="0.3" opacity="0.05"/>
+                    </pattern>
+                </defs>
+                <rect width="100%" height="100%" fill="url(#grid)" />
+
+                {/* Grid lines */}
+                {freqTicks.map(tick => (
+                    <line
+                        key={`v-grid-${tick.freq}`}
+                        x1={tick.x}
+                        y1={padding}
+                        x2={tick.x}
+                        y2={height - padding}
+                        stroke="#004225"
+                        strokeWidth="0.5"
+                        opacity="0.1"
+                    />
+                ))}
+                {dbTicks.map(tick => (
+                    <line
+                        key={`h-grid-${tick.db}`}
+                        x1={padding}
+                        y1={tick.y}
+                        x2={width - padding}
+                        y2={tick.y}
+                        stroke="#004225"
+                        strokeWidth="0.5"
+                        opacity="0.1"
+                    />
+                ))}
+
+                {/* 0dB reference line */}
+                <line
+                    x1={padding}
+                    y1={yScale(0)}
+                    x2={width - padding}
+                    y2={yScale(0)}
                     stroke="#004225"
-                    strokeWidth={2}
-                    dot={false}
-                    name="Frequency Response"
+                    strokeWidth="1"
+                    opacity="0.3"
                 />
-            </LineChart>
-        </ResponsiveContainer>
+
+                {/* Axes */}
+                <line x1={padding} y1={height - padding} x2={width - padding} y2={height - padding} stroke="#004225" strokeWidth="1"/>
+                <line x1={padding} y1={padding} x2={padding} y2={height - padding} stroke="#004225" strokeWidth="1"/>
+
+                {/* Data curve */}
+                {filteredData.length > 0 && (
+                    <path
+                        d={generatePath()}
+                        fill="none"
+                        stroke="#b8860b"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                    />
+                )}
+
+                {/* Data points (subtle) */}
+                {filteredData.map((d, i) => (
+                    <circle
+                        key={`point-${i}`}
+                        cx={xScale(d.frequency)}
+                        cy={yScale(d.magnitude)}
+                        r="1.5"
+                        fill="#004225"
+                        opacity="0.6"
+                    />
+                ))}
+
+                {/* Frequency tick marks and labels */}
+                {freqTicks.map(tick => (
+                    <g key={`freq-tick-${tick.freq}`}>
+                        <line
+                            x1={tick.x}
+                            y1={height - padding}
+                            x2={tick.x}
+                            y2={height - padding + 5}
+                            stroke="#004225"
+                            strokeWidth="1"
+                        />
+                        <text
+                            x={tick.x}
+                            y={height - padding + 18}
+                            textAnchor="middle"
+                            className="text-xs fill-current text-racing-green font-medium"
+                        >
+                            {tick.label}
+                        </text>
+                    </g>
+                ))}
+
+                {/* dB tick marks and labels */}
+                {dbTicks.map(tick => (
+                    <g key={`db-tick-${tick.db}`}>
+                        <line
+                            x1={padding - 5}
+                            y1={tick.y}
+                            x2={padding}
+                            y2={tick.y}
+                            stroke="#004225"
+                            strokeWidth="1"
+                        />
+                        <text
+                            x={padding - 8}
+                            y={tick.y + 4}
+                            textAnchor="end"
+                            className="text-xs fill-current text-racing-green font-medium"
+                        >
+                            {tick.label}
+                        </text>
+                    </g>
+                ))}
+
+                {/* Axis labels */}
+                <text
+                    x={width / 2}
+                    y={height - 10}
+                    textAnchor="middle"
+                    className="text-sm fill-current text-racing-green font-semibold"
+                >
+                    Frequency (Hz)
+                </text>
+                <text
+                    x={15}
+                    y={height / 2}
+                    textAnchor="middle"
+                    transform={`rotate(-90 15 ${height / 2})`}
+                    className="text-sm fill-current text-racing-green font-semibold"
+                >
+                    Magnitude (dB)
+                </text>
+            </svg>
+        </div>
     );
 };
+
+export default FrequencyChart;
 ```
 
 ## OpenAI Integration
@@ -1244,13 +1613,18 @@ deploy:
 
 ## Key Implementation Notes
 
-1. **Always use pre-signed URLs for file uploads** - Never stream through the server
-2. **FIFINE K669 calibration is hardcoded** - Can add more mic profiles later
-3. **Polling every 2 seconds is sufficient** - WebSockets are overkill for this
-4. **Use JSONB for frequency data** - Flexible and performant
-5. **Repository pattern for all database access** - Clean separation of concerns
-6. **Mock all external dependencies in tests** - Fast, reliable tests
-7. **British Racing Green theme throughout** - Consistent visual identity
-8. **Cache AI responses** - OpenAI API is expensive
-9. **Progress updates are UX critical** - Users need feedback during processing
-10. **Test coverage target is 80%** - Shows production quality
+1. **WebM/OGG browser recording** - Convert to WAV for Python compatibility using ffmpeg
+2. **Room dimensions enhance acoustics** - Optional user input enables resonance mode calculations
+3. **Single processing screen** - Eliminated jarring upload/processing phase transitions
+4. **Custom SVG frequency charts** - Professional dB scales with logarithmic frequency axes
+5. **Always use pre-signed URLs for file uploads** - Never stream through the server
+6. **FIFINE K669 calibration is hardcoded** - Can add more mic profiles later
+7. **Polling every 2 seconds is sufficient** - WebSockets are overkill for this
+8. **Use JSONB for frequency data** - Flexible and performant
+9. **Repository pattern for all database access** - Clean separation of concerns
+10. **Mock all external dependencies in tests** - Fast, reliable tests
+11. **British Racing Green theme throughout** - Consistent visual identity
+12. **Cache AI responses** - OpenAI API is expensive
+13. **Progress updates are UX critical** - Users need feedback during processing
+14. **Test coverage target is 80%** - Shows production quality
+15. **Real-time frontend-backend sync** - Live status polling and seamless navigation

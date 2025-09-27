@@ -1,8 +1,31 @@
-import { useParams } from 'react-router-dom'
+import { useParams, useNavigate } from 'react-router-dom'
+import { useEffect } from 'react'
 import ProgressBar from './ProgressBar'
+import { useAnalysisStatus } from '../hooks/useAnalysisStatus'
 
 const Analysis = () => {
   const { id } = useParams<{ id: string }>()
+  const navigate = useNavigate()
+  const { status, error, isComplete, progress, message } = useAnalysisStatus(id || null)
+
+  useEffect(() => {
+    if (isComplete) {
+      navigate(`/results/${id}`)
+    }
+  }, [isComplete, navigate, id])
+
+  if (error) {
+    return (
+      <div className="max-w-2xl mx-auto">
+        <div className="text-center mb-8">
+          <h1 className="text-3xl font-display font-bold text-racing-green mb-4">
+            Analysis Error
+          </h1>
+          <p className="text-red-600">{error}</p>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="max-w-2xl mx-auto">
@@ -11,7 +34,7 @@ const Analysis = () => {
           Analysis in Progress
         </h1>
         <p className="text-racing-green/70">
-          Analyzing your audio file... This may take a few moments.
+          {message || 'Analyzing your audio file... This may take a few moments.'}
         </p>
       </div>
 
@@ -19,10 +42,12 @@ const Analysis = () => {
         <div className="space-y-6">
           <div>
             <div className="flex justify-between text-sm text-racing-green/70 mb-2">
-              <span>Processing audio...</span>
-              <span>75%</span>
+              <span>{status?.status === 'pending' ? 'Queued for processing...' :
+                     status?.status === 'processing' ? 'Processing audio...' :
+                     'Preparing results...'}</span>
+              <span>{progress}%</span>
             </div>
-            <ProgressBar progress={75} />
+            <ProgressBar progress={progress} />
           </div>
 
           <div className="text-center">

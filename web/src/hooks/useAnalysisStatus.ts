@@ -1,6 +1,6 @@
 // Analysis status hook
 import { useState, useEffect, useCallback } from 'react';
-import axios from 'axios';
+import { api } from '../services/api';
 
 interface AnalysisStatus {
     id: string;
@@ -19,7 +19,7 @@ export function useAnalysisStatus(analysisId: string | null) {
         if (!analysisId) return;
 
         try {
-            const response = await axios.get(`/api/analyses/${analysisId}/status`);
+            const response = await api.get(`/analyses/${analysisId}/status`);
             setStatus(response.data);
 
             // Stop polling if completed or failed
