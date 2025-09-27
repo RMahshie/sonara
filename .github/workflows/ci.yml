@@ -38,6 +38,12 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-go-
 
+    - name: Install golang-migrate
+      run: |
+        curl -L https://github.com/golang-migrate/migrate/releases/download/v4.16.2/migrate.linux-amd64.tar.gz | tar xvz
+        sudo mv migrate /usr/local/bin/
+        chmod +x /usr/local/bin/migrate
+
     - name: Download dependencies
       run: go mod download
 
