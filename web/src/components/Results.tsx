@@ -74,7 +74,7 @@ const Results = () => {
         </p>
       </div>
 
-      <div className="grid md:grid-cols-3 gap-6 mb-8">
+      <div className="grid md:grid-cols-4 gap-6 mb-8">
         <div className="bg-white/70 backdrop-blur-sm rounded-xl p-6 shadow-lg">
           <h3 className="font-semibold text-racing-green mb-2">Analysis Info</h3>
           <div className="space-y-2 text-sm">
@@ -87,7 +87,7 @@ const Results = () => {
           </div>
         </div>
 
-        <div className="bg-white/70 backdrop-blur-sm rounded-xl p-6 shadow-lg md:col-span-2">
+        <div className="bg-white/70 backdrop-blur-sm rounded-xl p-6 shadow-lg md:col-span-3">
           <h3 className="font-semibold text-racing-green mb-4">Frequency Response</h3>
           <FrequencyChart data={result.frequency_data || []} />
         </div>

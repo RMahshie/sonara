@@ -54,16 +54,26 @@ Object.defineProperty(navigator, 'mediaDevices', {
   writable: true
 })
 
-// Mock MediaRecorder
-global.MediaRecorder = vi.fn().mockImplementation(() => ({
-  start: vi.fn(),
-  stop: vi.fn(),
-  ondataavailable: null,
-  onstop: null
-})) as any
+// Create a proper MediaRecorder mock class
+class MockMediaRecorderClass {
+  start = vi.fn()
+  stop = vi.fn()
+  ondataavailable: ((event: BlobEvent) => void) | null = null
+  onstop: (() => void) | null = null
+  onerror: ((event: Event) => void) | null = null
 
-// Add static method
-global.MediaRecorder.isTypeSupported = vi.fn(() => true)
+  static isTypeSupported = vi.fn(() => true)
+}
+
+// Create the mock constructor with proper typing
+const MockMediaRecorder = vi.fn().mockImplementation(() => {
+  return new MockMediaRecorderClass()
+}) as any
+
+// Add the static method
+MockMediaRecorder.isTypeSupported = vi.fn(() => true)
+
+global.MediaRecorder = MockMediaRecorder
 
 // Mock Audio
 global.Audio = vi.fn().mockImplementation(() => ({
@@ -233,22 +243,16 @@ describe('LiveRecorder', () => {
   // The backend error message handling is tested in the backend tests.
 
   it('validates recording size before upload', async () => {
-    // Mock MediaRecorder to return small blob
-    const mockMediaRecorder = {
-      start: vi.fn(),
-      stop: vi.fn(),
-      ondataavailable: null,
-      onstop: null,
-      onerror: null
-    }
+    // Create a specific mock instance for this test
+    const mockMediaRecorderInstance = new MockMediaRecorderClass()
 
     // Override the onstop to simulate small recording
-    mockMediaRecorder.onstop = () => {
+    mockMediaRecorderInstance.onstop = () => {
       // This would normally call uploadRecording with a small blob
       // but for testing, we verify the error message appears
     }
 
-    global.MediaRecorder = vi.fn().mockImplementation(() => mockMediaRecorder)
+    global.MediaRecorder = vi.fn().mockImplementation(() => mockMediaRecorderInstance) as any
 
     render(
       <BrowserRouter>

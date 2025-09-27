@@ -1,3 +1,5 @@
+import { useRef, useEffect, useState } from 'react'
+
 interface FrequencyData {
   frequency: number
   magnitude: number
@@ -8,16 +10,47 @@ interface FrequencyChartProps {
 }
 
 const FrequencyChart = ({ data }: FrequencyChartProps) => {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [width, setWidth] = useState(800) // fallback width
+
   // Chart dimensions
-  const width = 800
   const height = 400
   const padding = 60
+
+  // Dynamic width calculation
+  useEffect(() => {
+    const updateWidth = () => {
+      if (containerRef.current) {
+        const containerWidth = containerRef.current.clientWidth
+        // Always fit container to prevent overflow, with reasonable minimum for readability
+        const usableWidth = Math.max(250, containerWidth) // 250px minimum for basic readability
+        setWidth(usableWidth)
+      }
+    }
+
+    // Initial calculation
+    updateWidth()
+
+    // Use ResizeObserver to watch container size changes immediately
+    const resizeObserver = new ResizeObserver(updateWidth)
+    if (containerRef.current) {
+      resizeObserver.observe(containerRef.current)
+    }
+
+    // Keep window resize as fallback for edge cases
+    window.addEventListener('resize', updateWidth)
+
+    return () => {
+      resizeObserver.disconnect()
+      window.removeEventListener('resize', updateWidth)
+    }
+  }, [padding])
 
   // Fixed ranges for professional audio visualization
   const FREQ_MIN = 20
   const FREQ_MAX = 20000
-  const DB_MIN = -25
-  const DB_MAX = 25
+  const DB_MIN = -15
+  const DB_MAX = 15
 
   // Generate tick marks
   const generateFrequencyTicks = (): Array<{ x: number; label: string; freq: number }> => {
@@ -37,7 +70,7 @@ const FrequencyChart = ({ data }: FrequencyChartProps) => {
 
   const generateDbTicks = (): Array<{ y: number; label: string; db: number }> => {
     const ticks: Array<{ y: number; label: string; db: number }> = []
-    const dbValues = [-25, -20, -15, -10, -5, 0, 5, 10, 15, 20, 25]
+    const dbValues = [-15, -10, -5, 0, 5, 10, 15]
 
     dbValues.forEach(db => {
       const y = yScale(db)
@@ -82,7 +115,7 @@ const FrequencyChart = ({ data }: FrequencyChartProps) => {
   const dbTicks = generateDbTicks()
 
   return (
-    <div className="w-full overflow-x-auto">
+    <div ref={containerRef} className="w-full">
       <svg width={width} height={height} className="border border-racing-green/20 rounded-lg bg-white">
         {/* Grid lines */}
         <defs>
