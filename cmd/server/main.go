@@ -73,7 +73,7 @@ func main() {
 	log.Info().Msg("S3 service initialized successfully")
 
 	// Initialize processing service
-	processingSvc := processing.NewProcessingService(s3Service, analysisRepo, "scripts/analyze_audio.py", cfg.Processing.PythonCmd)
+	processingSvc := processing.NewProcessingService(s3Service, analysisRepo, "scripts/analyze_audio.py")
 
 	// Create Chi router
 	router := chi.NewRouter()
