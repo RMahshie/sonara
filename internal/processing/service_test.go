@@ -181,7 +181,7 @@ func TestFullAnalysisPipeline_Integration(t *testing.T) {
 	s3Service, err := storage.NewS3Service(s3Config)
 	require.NoError(t, err)
 
-	processingService := NewProcessingService(s3Service, repo, "../../scripts/analyze_audio.py", "python3")
+	processingService := NewProcessingService(s3Service, repo, "../../scripts/analyze_audio.py")
 
 	// Generate test audio file (1kHz sine wave)
 	audioData := generateTestAudio(t, 1000.0, 44100, 2.0)
@@ -436,7 +436,7 @@ func TestMinIOEndToEndAnalysis_Integration(t *testing.T) {
 	s3Service, err := storage.NewS3Service(s3Config)
 	require.NoError(t, err)
 
-	processingService := NewProcessingService(s3Service, repo, "../../scripts/analyze_audio.py", "python3")
+	processingService := NewProcessingService(s3Service, repo, "../../scripts/analyze_audio.py")
 
 	// Generate test audio file (1kHz sine wave) - same as other tests
 	audioData := generateTestAudio(t, 1000.0, 44100, 2.0)
@@ -623,7 +623,7 @@ func TestAnalysisPipelineFailure_Integration(t *testing.T) {
 	s3Service, err := storage.NewS3Service(s3Config)
 	require.NoError(t, err)
 
-	processingService := NewProcessingService(s3Service, repo, "../../scripts/analyze_audio.py", "python3")
+	processingService := NewProcessingService(s3Service, repo, "../../scripts/analyze_audio.py")
 
 	// Create analysis with non-existent S3 key
 	nonExistentKey := "non-existent-file.wav"

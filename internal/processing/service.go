@@ -28,7 +28,18 @@ type processingService struct {
 	pythonCmd  string // Python command to use (from config)
 }
 
-func NewProcessingService(s3Service storage.S3Service, repo repository.AnalysisRepository, pythonPath, pythonCmd string) ProcessingService {
+func NewProcessingService(s3Service storage.S3Service, repo repository.AnalysisRepository, pythonPath string) ProcessingService {
+	// Make pythonCmd configurable via environment variable with fallback
+	pythonCmd := os.Getenv("PYTHON_CMD")
+	if pythonCmd == "" {
+		// Try to detect virtual environment
+		if venv := os.Getenv("VIRTUAL_ENV"); venv != "" {
+			pythonCmd = filepath.Join(venv, "bin", "python3")
+		} else {
+			pythonCmd = "python3" // System python fallback
+		}
+	}
+
 	return &processingService{
 		s3:         s3Service,
 		repository: repo,
