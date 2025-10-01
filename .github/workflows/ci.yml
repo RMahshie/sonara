@@ -51,8 +51,8 @@ jobs:
       run: go mod download
 
     - name: Start analyzer container
-      run: docker-compose up -d analyzer
-      
+      run: docker compose up -d analyzer
+
     - name: Wait for container ready
       run: docker exec sonara-analyzer-1 python -c "import librosa; print('Ready')"
 
