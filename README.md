@@ -4,9 +4,11 @@ Sonara is a consumer application for analyzing your room's frequency response an
 
 The application features a modern web interface built with React and TypeScript, powered by a Go backend that orchestrates Python-based audio signal processing with libraries like NumPy, SciPy, and Librosa. Data is stored in PostgreSQL with file assets on AWS S3, while OpenAI integration delivers intelligent recommendations for acoustic improvements.
 
-![Sonara Application Screenshot](photos/Screenshot%202025-09-30%20at%2011.17.40%E2%80%AFPM.png)
-
 ![Sonara Start Screen Screenshot](photos/Screenshot%202025-09-30%20at%2011.21.41%E2%80%AFPM.png)
+*The main interface featuring a start button that initiates live room analysis by playing test signals while recording simultaneously.*
+
+![Sonara Application Screenshot](photos/Screenshot%202025-09-30%20at%2011.17.40%E2%80%AFPM.png)
+*Interactive frequency response graph displaying room acoustics analysis with detailed measurements.*
 
 
 ## ⚙️ Environment Configuration
