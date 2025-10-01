@@ -15,7 +15,8 @@ The application features a modern web interface built with React and TypeScript,
 
 **PYTHON_CMD** determines how the Go backend calls the Python audio analyzer:
 
-- **Development**: `export PYTHON_CMD="docker exec analyzer python /app/analyze_audio.py"`
-- **Production**: `export PYTHON_CMD="python /app/scripts/analyze_audio.py"`
+- **Development**: `export ENVIRONMENT=dev or nothing"`
+- **Testing**: `export ENVIRONMENT=test`
+- **Production**: `export ENVIRONMENT=prod`
 
 This allows the same codebase to work with containerized Python in development and direct execution in production.
