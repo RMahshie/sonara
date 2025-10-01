@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/RMahshie/sonara/internal/config"
 	"github.com/RMahshie/sonara/internal/repository/postgres"
 	"github.com/RMahshie/sonara/internal/storage"
 	"github.com/RMahshie/sonara/pkg/models"
@@ -39,6 +40,15 @@ type TestContainer struct {
 	dbURL             string
 	minioURL          string
 	bucketName        string
+}
+
+// createTestConfig creates a test configuration with direct Python execution using venv
+func createTestConfig() *config.Config {
+	return &config.Config{
+		Processing: config.ProcessingConfig{
+			PythonCmd: "../../scripts/venv/bin/python3",
+		},
+	}
 }
 
 // SetupIntegrationTest sets up PostgreSQL and MinIO containers for integration testing
@@ -170,7 +180,8 @@ func TestFullAnalysisPipeline_Integration(t *testing.T) {
 	s3Service, err := storage.NewS3Service(s3Config)
 	require.NoError(t, err)
 
-	processingService := NewProcessingService(s3Service, repo, "../../scripts/analyze_audio.py")
+	testCfg := createTestConfig()
+	processingService := NewProcessingService(s3Service, repo, testCfg, "../../scripts/analyze_audio.py")
 
 	// Generate test audio file (1kHz sine wave)
 	audioData := generateTestAudio(t, 1000.0, 44100, 2.0)
@@ -188,7 +199,7 @@ func TestFullAnalysisPipeline_Integration(t *testing.T) {
 	analysis := &models.Analysis{
 		ID:         uuid.New().String(), // Generate UUID for the analysis
 		SessionID:  uuid.New().String(),
-		SignalID:   "sine_sweep_20_20k", // Valid signal ID for testing
+		SignalID:   "exp_sweep_20_20k_44", // Valid signal ID for testing
 		Status:     "pending",
 		Progress:   0,
 		AudioS3Key: &audioKeyPtr,
@@ -414,7 +425,8 @@ func TestMinIOEndToEndAnalysis_Integration(t *testing.T) {
 	s3Service, err := storage.NewS3Service(s3Config)
 	require.NoError(t, err)
 
-	processingService := NewProcessingService(s3Service, repo, "../../scripts/analyze_audio.py")
+	testCfg := createTestConfig()
+	processingService := NewProcessingService(s3Service, repo, testCfg, "../../scripts/analyze_audio.py")
 
 	// Generate test audio file (1kHz sine wave) - same as other tests
 	audioData := generateTestAudio(t, 1000.0, 44100, 2.0)
@@ -436,7 +448,7 @@ func TestMinIOEndToEndAnalysis_Integration(t *testing.T) {
 	analysis := &models.Analysis{
 		ID:         uuid.New().String(),
 		SessionID:  uuid.New().String(),
-		SignalID:   "sine_sweep_20_20k", // Valid signal ID for testing
+		SignalID:   "exp_sweep_20_20k_44", // Valid signal ID for testing
 		Status:     "pending",
 		Progress:   0,
 		AudioS3Key: &nonExistentKey, // Real MinIO key - will trigger actual download
@@ -590,7 +602,8 @@ func TestAnalysisPipelineFailure_Integration(t *testing.T) {
 	s3Service, err := storage.NewS3Service(s3Config)
 	require.NoError(t, err)
 
-	processingService := NewProcessingService(s3Service, repo, "../../scripts/analyze_audio.py")
+	testCfg := createTestConfig()
+	processingService := NewProcessingService(s3Service, repo, testCfg, "../../scripts/analyze_audio.py")
 
 	// Create analysis with non-existent S3 key
 	nonExistentKey := "non-existent-file.wav"
@@ -598,7 +611,7 @@ func TestAnalysisPipelineFailure_Integration(t *testing.T) {
 	analysis := &models.Analysis{
 		ID:         uuid.New().String(),
 		SessionID:  uuid.New().String(),
-		SignalID:   "sine_sweep_20_20k", // Valid signal ID for testing (though test expects failure from S3)
+		SignalID:   "exp_sweep_20_20k_44", // Valid signal ID for testing (though test expects failure from S3)
 		Status:     "pending",
 		Progress:   0,
 		AudioS3Key: &nonExistentKey,

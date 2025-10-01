@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/RMahshie/sonara/internal/config"
 	"github.com/RMahshie/sonara/internal/repository"
 	"github.com/RMahshie/sonara/internal/storage"
 	"github.com/RMahshie/sonara/pkg/models"
@@ -28,16 +29,37 @@ type processingService struct {
 	pythonArgs []string // Python command arguments (for Docker or direct execution)
 }
 
-func NewProcessingService(s3Service storage.S3Service, repo repository.AnalysisRepository, pythonPath string) ProcessingService {
-	// Hardcode Docker analyzer container command for development
-	pythonArgs := []string{"docker", "exec", "sonara-analyzer-1", "python", "/app/analyze_audio.py"}
+func NewProcessingService(s3Service storage.S3Service, repo repository.AnalysisRepository, cfg *config.Config, scriptPath string) ProcessingService {
+	// Parse PYTHON_CMD from config into command arguments
+	pythonArgs := parsePythonCommand(cfg.Processing.PythonCmd)
+
+	// For containerized execution (contains "docker exec"), script path is already included
+	// For direct execution ("python3"), append the script path
+	if !strings.Contains(cfg.Processing.PythonCmd, "docker exec") {
+		pythonArgs = append(pythonArgs, scriptPath)
+	}
 
 	return &processingService{
 		s3:         s3Service,
 		repository: repo,
-		pythonPath: pythonPath,
+		pythonPath: scriptPath, // Store the script path for reference
 		pythonArgs: pythonArgs,
 	}
+}
+
+// parsePythonCommand parses a PYTHON_CMD string into command arguments
+// Examples:
+//
+//	"python3" → ["python3"]
+//	"docker exec analyzer python /app/analyze_audio.py" → ["docker", "exec", "analyzer", "python", "/app/analyze_audio.py"]
+func parsePythonCommand(pythonCmd string) []string {
+	if pythonCmd == "" {
+		return []string{"python3"} // fallback
+	}
+
+	// Split on spaces, but be careful with quoted arguments
+	// For now, simple space splitting should work for our use cases
+	return strings.Fields(pythonCmd)
 }
 
 func (s *processingService) ProcessAnalysis(ctx context.Context, analysisID uuid.UUID) error {
