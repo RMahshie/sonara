@@ -4,7 +4,7 @@ import { analysisService } from '../services/analysisService'
 import ProgressBar from './ProgressBar'
 
 // Test signal configuration
-const TEST_SIGNAL = "sine_sweep_20_20k"
+const TEST_SIGNAL = "exp_sweep_20_20k_44"
 
 export const LiveRecorder: React.FC = () => {
   const [isRecording, setIsRecording] = useState(false)
@@ -91,7 +91,7 @@ export const LiveRecorder: React.FC = () => {
       }
 
       // Play test signal and record simultaneously
-      const testSignal = new Audio('/test-signals/sweep-20-20k-10s.wav')
+      const testSignal = new Audio('/test-signals/exp-sweep-44.wav')
       testSignal.volume = 1.0
 
       // Add error handlers for test signal

@@ -107,7 +107,7 @@ func (s *processingService) ProcessAnalysis(ctx context.Context, analysisID uuid
 	// Step 4.5: Convert WebM/OGG to WAV for Python compatibility
 	log.Info().Str("analysisID", analysisID.String()).Msg("Step 4.5: Converting audio to WAV format with FFmpeg")
 	wavFile := filepath.Join("/tmp", fmt.Sprintf("%s.wav", analysisID))
-	convertCmd := exec.Command("ffmpeg", "-i", tempFile, "-acodec", "pcm_s16le", "-ar", "48000", "-y", wavFile)
+	convertCmd := exec.Command("ffmpeg", "-i", tempFile, "-acodec", "pcm_s16le", "-ar", "44100", "-y", wavFile)
 	if err := convertCmd.Run(); err != nil {
 		return fmt.Errorf("failed to convert audio to WAV: %w", err)
 	}

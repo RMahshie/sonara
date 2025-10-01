@@ -16,18 +16,17 @@ class ReferenceSignalManager:
     """
     Manages reference signals for acoustic measurement.
 
-    Stores original test signals and their inverse filters for deconvolution.
+    Stores original test signals for spectral division deconvolution.
     Pre-computes FFTs for performance.
     """
 
     def __init__(self):
         self.base_path = os.path.join(os.path.dirname(__file__), 'reference_signals')
         self.signals = {
-            "sine_sweep_20_20k": {
-                "sweep": "sweep-20-20k-10s.wav",
-                "inverse": "sweep-20-20k-inverse.wav",
-                "description": "10s logarithmic sine sweep 20Hz-20kHz"
-            }
+            "exp_sweep_20_20k_44": {
+                "sweep": "exp-sweep-44.wav",
+                "description": "10s exponential sine sweep 20Hz-20kHz at 44.1kHz"
+            },
         }
         self.fft_cache = {}
         self._load_cache()
@@ -36,19 +35,15 @@ class ReferenceSignalManager:
         """Pre-compute and cache FFTs for performance"""
         for signal_id, config in self.signals.items():
             sweep_path = os.path.join(self.base_path, config["sweep"])
-            inverse_path = os.path.join(self.base_path, config["inverse"])
 
             try:
-                # Load signals
+                # Load sweep signal only (inverse not needed for spectral division)
                 sweep, sr = librosa.load(sweep_path, sr=None, mono=True)
-                inverse, _ = librosa.load(inverse_path, sr=None, mono=True)
 
                 # Cache FFTs (32k points for consistency)
                 self.fft_cache[signal_id] = {
                     "sweep_fft": np.fft.rfft(sweep, n=32768),
-                    "inverse_fft": np.fft.rfft(inverse, n=32768),
                     "sweep_signal": sweep,
-                    "inverse_signal": inverse,
                     "sample_rate": sr
                 }
                 logging.info(f"Loaded reference signal: {signal_id}")
@@ -78,7 +73,7 @@ class ReferenceSignalManager:
         if data is None:
             return False
 
-        required_keys = ["sweep_fft", "inverse_fft", "sweep_signal", "inverse_signal", "sample_rate"]
+        required_keys = ["sweep_fft", "sweep_signal", "sample_rate"]
         return all(key in data for key in required_keys)
 
 

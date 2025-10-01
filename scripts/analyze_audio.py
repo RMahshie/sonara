@@ -26,19 +26,19 @@ class AudioAnalyzer:
         # FIFINE K669 USB Microphone calibration curve
         # Compensates for microphone frequency response
         self.calibration_curve = [
-            (20, 12),     # +12dB at 20Hz (mic rolls off)
-            (50, 3),      # +3dB at 50Hz
-            (100, 0),     # Flat at 100Hz
-            (200, 0),     # Flat at 200Hz
-            (500, 0),     # Flat at 500Hz
-            (1000, 0),    # Flat at 1kHz (reference)
-            (2000, -1),   # -1dB at 2kHz
-            (5000, -2),   # -2dB at 5kHz
-            (8000, -3),   # -3dB at 8kHz (mic boost)
-            (10000, -3.5), # -3.5dB at 10kHz
-            (12000, -4),  # -4dB at 12kHz
-            (16000, -2),  # -2dB at 16kHz
-            (20000, 5)    # +5dB at 20kHz (mic rolls off)
+            # (20, 12),     # +12dB at 20Hz (mic rolls off)
+            # (50, 3),      # +3dB at 50Hz
+            # (100, 0),     # Flat at 100Hz
+            # (200, 0),     # Flat at 200Hz
+            # (500, 0),     # Flat at 500Hz
+            # (1000, 0),    # Flat at 1kHz (reference)
+            # (2000, -1),   # -1dB at 2kHz
+            # (5000, -2),   # -2dB at 5kHz
+            # (8000, -3),   # -3dB at 8kHz (mic boost)
+            # (10000, -3.5), # -3.5dB at 10kHz
+            # (12000, -4),  # -4dB at 12kHz
+            # (16000, -2),  # -2dB at 16kHz
+            # (20000, 5)    # +5dB at 20kHz (mic rolls off)
         ]
 
     def load_audio(self, filepath):
@@ -293,9 +293,42 @@ class FrequencyAnalyzer:
 
     def __init__(self):
         self.fft_size = 32768  # 32k FFT for high resolution
-        self.smoothing_fraction = 1/6  # 1/12 octave smoothing
+        self.smoothing_fraction = 1/3  # 1/6 octave smoothing
         self.reference_freq = 1000  # 1kHz normalization
         self.ref_manager = get_reference_manager()
+
+    def align_signals(self, recorded, reference):
+        """
+        Align recorded signal with reference using cross-correlation.
+
+        Compensates for recording delays by finding the optimal alignment
+        between the recorded signal and reference sweep.
+
+        Args:
+            recorded: Recorded audio signal (numpy array)
+            reference: Reference sweep signal (numpy array)
+
+        Returns:
+            numpy array: Aligned recorded signal
+        """
+        logging.info("Aligning signals using cross-correlation")
+
+        # Compute cross-correlation
+        correlation = signal.correlate(recorded, reference, mode='valid')
+
+        # Find the delay that gives maximum correlation
+        delay = np.argmax(np.abs(correlation))
+        logging.info(f"Optimal delay found: {delay} samples")
+
+        # Align by trimming the recorded signal
+        if delay < len(recorded):
+            aligned = recorded[delay:delay + len(reference)]
+            logging.info(f"Aligned signal length: {len(aligned)} samples")
+            return aligned
+        else:
+            # If delay is too large, return original (fallback)
+            logging.warning("Alignment delay too large, using original signal")
+            return recorded[:len(reference)] if len(recorded) > len(reference) else recorded
 
     def analyze_sweep_deconvolution(self, recorded_file, signal_id):
         """
@@ -326,30 +359,35 @@ class FrequencyAnalyzer:
         except Exception as e:
             raise ValueError(f"Failed to load recorded file {recorded_file}: {e}")
 
-        # 3. Direct deconvolution (no alignment needed for sine sweeps)
-        logging.info("Step 3: Performing deconvolution")
+        # 3. Align signals using cross-correlation
+        logging.info("Step 3: Aligning recorded signal with reference")
+        aligned_recorded = self.align_signals(recorded, ref_data["sweep_signal"])
+        logging.info(f"Signal alignment completed - aligned length: {len(aligned_recorded)} samples")
+
+        # 4. Perform regularized spectral division deconvolution
+        logging.info("Step 4: Performing regularized spectral division deconvolution")
         impulse_response = self.deconvolve_signals(
-            recorded, ref_data["inverse_signal"]
+            aligned_recorded, ref_data["sweep_signal"]
         )
         logging.info(f"Deconvolution completed - impulse response length: {len(impulse_response)} samples")
 
-        # 4. Extract acoustic impulse window
-        logging.info("Step 4: Extracting acoustic impulse window")
+        # 5. Extract acoustic impulse window
+        logging.info("Step 5: Extracting acoustic impulse window")
         impulse_windowed = self.extract_impulse_window(impulse_response, sr)
         logging.info(f"Impulse window extracted - length: {len(impulse_windowed)} samples")
 
-        # 5. Convert impulse response to frequency response
-        logging.info("Step 5: Converting impulse to frequency response")
+        # 6. Convert impulse response to frequency response
+        logging.info("Step 6: Converting impulse to frequency response")
         freqs, response_db = self.impulse_to_frequency_response(impulse_windowed, sr)
         logging.info(f"Frequency response calculated - {len(freqs)} frequency points")
 
-        # 6. Apply fractional octave smoothing
-        logging.info("Step 6: Applying fractional octave smoothing")
+        # 7. Apply fractional octave smoothing
+        logging.info("Step 7: Applying fractional octave smoothing")
         smooth_response = self.apply_fractional_octave_smoothing(freqs, response_db)
         logging.info("Fractional octave smoothing applied")
 
-        # 7. Normalize to 0dB at 1kHz
-        logging.info("Step 7: Normalizing response to 0dB at 1kHz")
+        # 8. Normalize to 0dB at 1kHz
+        logging.info("Step 8: Normalizing response to 0dB at 1kHz")
         final_response = self.normalize_response(freqs, smooth_response)
         logging.info("Response normalization completed")
 
@@ -357,31 +395,58 @@ class FrequencyAnalyzer:
         return freqs, final_response
 
 
-    def deconvolve_signals(self, recorded, inverse_filter):
+    def deconvolve_signals(self, recorded, reference_sweep, lambda_reg=1e-3):
         """
-        Deconvolve recorded signal with inverse filter to get impulse response.
+        Deconvolve recorded signal with reference sweep using regularized spectral division.
 
-        Uses FFT-based convolution for efficiency with complete convolution result.
+        Uses frequency domain division with regularization to prevent noise amplification
+        where the reference sweep has weak energy.
+
+        Args:
+            recorded: Recorded audio signal (numpy array)
+            reference_sweep: Reference sweep signal (numpy array)
+            lambda_reg: Regularization parameter (default: 1e-3)
+
+        Returns:
+            numpy array: Impulse response
         """
-        return signal.fftconvolve(recorded, inverse_filter, mode='full')
+        logging.info("Performing regularized spectral division deconvolution")
+
+        # Pad to avoid circular convolution artifacts
+        n = len(recorded) + len(reference_sweep) - 1
+
+        # FFT of both signals
+        Y = np.fft.fft(recorded, n)  # Recorded signal
+        X = np.fft.fft(reference_sweep, n)  # Reference sweep
+
+        # Regularized spectral division: H = (Y * conj(X)) / (|X|² + λ)
+        # This gives us the transfer function H such that recorded = reference_sweep * H
+        H = (Y * np.conj(X)) / (np.abs(X)**2 + lambda_reg)
+
+        # Inverse FFT to get impulse response
+        impulse = np.real(np.fft.ifft(H))
+
+        logging.info(f"Deconvolution completed - impulse response length: {len(impulse)} samples")
+        return impulse
 
     def extract_impulse_window(self, impulse, sample_rate):
         """
         Extract the main impulse response with acoustic-appropriate windowing.
 
         Finds the main peak and windows around it for room acoustic measurements.
-        Uses 500ms total window (100ms before peak, 400ms after peak).
+        Uses 450ms total window (50ms before peak, 400ms after peak).
         """
         # Find main impulse peak
         peak_idx = np.argmax(np.abs(impulse))
 
-        # Acoustic window: 500ms total (100ms before, 400ms after peak)
-        pre_samples = int(0.1 * sample_rate)   # 100ms before peak
-        post_samples = int(0.4 * sample_rate)  # 400ms after peak
+        # Acoustic window: 450ms total (50ms before, 400ms after peak)
+        pre_samples = int(0.05 * sample_rate)  # 50ms before peak (reduced from 100ms)
+        post_samples = int(0.4 * sample_rate)  # 400ms after peak (unchanged)
 
         start = max(0, peak_idx - pre_samples)
         end = min(len(impulse), peak_idx + post_samples)
 
+        logging.info(f"Impulse window: peak at {peak_idx}, window from {start} to {end} ({(end-start)/sample_rate*1000:.1f}ms)")
         return impulse[start:end]
 
     def impulse_to_frequency_response(self, impulse, sample_rate):
@@ -408,6 +473,7 @@ class FrequencyAnalyzer:
         """
         Apply 1/12 octave smoothing for clean, detailed curves.
 
+        Correctly averages in power domain (not dB domain) for mathematically sound results.
         Smoothing reduces noise while preserving acoustic detail.
         """
         smoothed = np.zeros_like(magnitude_db)
@@ -426,10 +492,11 @@ class FrequencyAnalyzer:
             in_band = (frequencies >= lower_freq) & (frequencies <= upper_freq)
 
             if np.any(in_band):
-                # RMS averaging in linear domain (more accurate than dB averaging)
-                linear_values = 10 ** (magnitude_db[in_band] / 20)
-                rms_linear = np.sqrt(np.mean(linear_values ** 2))
-                smoothed[i] = 20 * np.log10(rms_linear + 1e-12)
+                # Convert dB to power, average power, then back to dB
+                # This is mathematically correct (average intensity, not amplitudes)
+                power_values = 10 ** (magnitude_db[in_band] / 10)  # dB to power
+                avg_power = np.mean(power_values)  # Average power
+                smoothed[i] = 10 * np.log10(avg_power + 1e-12)  # Power to dB
             else:
                 smoothed[i] = magnitude_db[i]
 

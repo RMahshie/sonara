@@ -9,6 +9,37 @@ const Results = () => {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
+  // CSV conversion utility function
+  const convertToCSV = (frequencyData: Array<{frequency: number, magnitude: number}>): string => {
+    const headers = ['Frequency (Hz)', 'Magnitude (dB)']
+    const rows = frequencyData.map(point => [point.frequency.toString(), point.magnitude.toString()])
+    const csvContent = [headers, ...rows].map(row => row.join(',')).join('\n')
+    return csvContent
+  }
+
+  // Download handler function
+  const handleDownloadCSV = (frequencyData: Array<{frequency: number, magnitude: number}>, analysisId: string) => {
+    if (!frequencyData || frequencyData.length === 0) {
+      alert('No frequency data available for download')
+      return
+    }
+
+    const csvContent = convertToCSV(frequencyData)
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+    const link = document.createElement('a')
+
+    if (link.download !== undefined) {
+      const url = URL.createObjectURL(blob)
+      link.setAttribute('href', url)
+      link.setAttribute('download', `analysis-${analysisId}-frequency-response.csv`)
+      link.style.visibility = 'hidden'
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      URL.revokeObjectURL(url) // Clean up the URL object
+    }
+  }
+
   useEffect(() => {
     const fetchResults = async () => {
       try {
@@ -85,6 +116,17 @@ const Results = () => {
             )}
             <p><span className="font-medium">Created:</span> {new Date(result.created_at).toLocaleString()}</p>
           </div>
+
+          {result.frequency_data && result.frequency_data.length > 0 && (
+            <div className="pt-2 border-t border-racing-green/10">
+              <button
+                onClick={() => handleDownloadCSV(result.frequency_data, result.id)}
+                className="w-full px-3 py-2 text-sm bg-racing-green hover:bg-racing-green/90 text-cream font-medium rounded-md transition-colors duration-200"
+              >
+                Download Frequency Data (CSV)
+              </button>
+            </div>
+          )}
         </div>
 
         <div className="bg-white/70 backdrop-blur-sm rounded-xl p-6 shadow-lg md:col-span-3">
