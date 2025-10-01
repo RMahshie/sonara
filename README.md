@@ -15,7 +15,7 @@ The application features a modern web interface built with React and TypeScript,
 
 **PYTHON_CMD** determines how the Go backend calls the Python audio analyzer:
 
-- **Development**: `export ENVIRONMENT=dev or nothing"`
+- **Development**: `export ENVIRONMENT=dev`
 - **Testing**: `export ENVIRONMENT=test`
 - **Production**: `export ENVIRONMENT=prod`
 
