@@ -2,11 +2,11 @@ FROM node:18-alpine AS builder
 WORKDIR /app
 
 # Copy package files
-COPY web/package*.json ./
+COPY package*.json ./
 RUN npm ci
 
 # Copy web source
-COPY web/ ./
+COPY . ./
 
 ARG VITE_API_URL
 ENV VITE_API_URL=$VITE_API_URL
