@@ -17,7 +17,7 @@ RUN pip install uv
 
 COPY --from=builder /app/server /usr/local/bin/server
 COPY scripts/requirements.txt .
-RUN uv pip install -r requirements.txt
+RUN uv pip install --system -r requirements.txt
 COPY scripts/*.py ./scripts/
 EXPOSE 8080
 CMD ["server"]
