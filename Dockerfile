@@ -12,9 +12,12 @@ WORKDIR /app
 # Install ffmpeg for audio conversion
 RUN apt-get update && apt-get install -y ffmpeg && rm -rf /var/lib/apt/lists/*
 
+# Install uv package manager
+RUN pip install uv
+
 COPY --from=builder /app/server /usr/local/bin/server
 COPY scripts/requirements.txt .
-RUN pip install -r requirements.txt
+RUN uv pip install -r requirements.txt
 COPY scripts/*.py ./scripts/
 EXPOSE 8080
 CMD ["server"]
