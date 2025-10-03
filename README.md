@@ -1,4 +1,4 @@
-# Sonara, 'See your sound clearly'
+# Sonara, 'See your sound clearly' - [Try It Now](https://sonara.up.railway.app/) 
 
 Sonara is a consumer application for analyzing your room's frequency response and echo characteristics using a USB microphone. It provides actionable insights for optimizing speaker placement and sound treatment to achieve more accurate, professional-quality audio in your listening space.
 
