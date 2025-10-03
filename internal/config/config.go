@@ -2,7 +2,7 @@ package config
 
 import (
 	"github.com/spf13/viper"
-
+	"github.com/rs/zerolog/log"
 	"strings"
 )
 
@@ -57,7 +57,7 @@ func Load() (*Config, error) {
 	viper.SetDefault("AWS_SECRET_ACCESS_KEY", "")
 	viper.SetDefault("S3_BUCKET", "sonara-audio")
 	viper.SetDefault("S3_ENDPOINT", "http://localhost:9000")
-	viper.SetDefault("ALLOWED_ORIGINS", "http://localhost:5173,http://localhost:3000,https://sonara.up.railway.app")
+	viper.SetDefault("ALLOWED_ORIGINS", "https://sonara.up.railway.app,http://localhost:5173,http://localhost:3000")
 	viper.SetDefault("OPENAI_API_KEY", "")
 	viper.SetDefault("PYTHON_CMD", "python3")
 
@@ -103,6 +103,12 @@ func Load() (*Config, error) {
 	config.AWS.S3Endpoint = viper.GetString("S3_ENDPOINT")
 	config.OpenAI.APIKey = viper.GetString("OPENAI_API_KEY")
 	config.Processing.PythonCmd = viper.GetString("PYTHON_CMD")
+
+	// Add this debug logging
+	log.Info().
+	Strs("allowed_origins", config.Server.AllowedOrigins).
+	Int("origin_count", len(config.Server.AllowedOrigins)).
+	Msg("CORS configuration debug")
 
 	return &config, nil
 }

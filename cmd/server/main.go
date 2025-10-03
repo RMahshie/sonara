@@ -39,6 +39,11 @@ func main() {
 	}
 	log.Info().Str("port", cfg.Server.Port).Str("env", cfg.Server.Env).Msg("Configuration loaded successfully")
 
+	log.Info().
+		Strs("allowed_origins", cfg.Server.AllowedOrigins).
+		Int("origin_count", len(cfg.Server.AllowedOrigins)).
+		Msg("CORS configuration debug")
+
 	// Initialize database connection
 	log.Info().Msg("Connecting to database...")
 	db, err := sql.Open("postgres", cfg.Database.URL)
