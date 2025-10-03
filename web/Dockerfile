@@ -6,6 +6,9 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci
 
+# Force fresh build with timestamp
+RUN date > /build-time.txt
+
 # Copy web source
 COPY . ./
 
