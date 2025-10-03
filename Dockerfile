@@ -1,5 +1,6 @@
 # Production multi-stage Dockerfile
 FROM golang:1.24 AS builder
+ARG CACHEBUST=1
 WORKDIR /app
 COPY go.* ./
 RUN go mod download
