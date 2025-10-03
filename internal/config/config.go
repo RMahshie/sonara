@@ -56,7 +56,7 @@ func Load() (*Config, error) {
 	viper.SetDefault("AWS_ACCESS_KEY_ID", "")
 	viper.SetDefault("AWS_SECRET_ACCESS_KEY", "")
 	viper.SetDefault("S3_BUCKET", "sonara-audio")
-	viper.SetDefault("S3_ENDPOINT", "http://localhost:9000")
+	viper.SetDefault("S3_ENDPOINT", "")
 	viper.SetDefault("ALLOWED_ORIGINS", "https://sonara.up.railway.app,http://localhost:5173,http://localhost:3000")
 	viper.SetDefault("OPENAI_API_KEY", "")
 	viper.SetDefault("PYTHON_CMD", "python3")
