@@ -15,6 +15,8 @@ RUN npm run build
 
 # Serve with nginx
 FROM nginx:alpine
+ARG CACHEBUST
+ENV CACHEBUST=$CACHEBUST
 COPY --from=builder /app/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/nginx.conf
 
