@@ -242,7 +242,7 @@ dmypy.json
 .dockerignore
 
 # Temporary audio files
-*.wav
+
 *.mp3
 *.flac
 /tmp/audio_*
