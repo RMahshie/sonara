@@ -15,8 +15,8 @@ RUN npm run build
 
 # Serve with nginx
 FROM nginx:alpine
-ARG CACHEBUST
-ENV CACHEBUST=$CACHEBUST
+# Force fresh copy with timestamp
+RUN date > /tmp/build-time.txt
 COPY --from=builder /app/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/nginx.conf
 
