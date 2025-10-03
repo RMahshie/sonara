@@ -6,7 +6,7 @@ const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080';
 // Create axios instance with base configuration
 export const api = axios.create({
     baseURL: `${API_URL}/api`,
-    withCredentials: true, // Important for CORS
+    withCredentials: false, // Important for CORS
     headers: {
         'Content-Type': 'application/json',
     }
