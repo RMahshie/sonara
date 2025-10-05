@@ -25,15 +25,9 @@ export interface AnalysisResult {
 }
 
 export interface RoomInfoInput {
-  room_length?: number
-  room_width?: number
-  room_height?: number
-  room_size: string
-  ceiling_height: string
-  floor_type: string
-  features: string[]
-  speaker_placement: string
-  additional_notes: string
+  room_length_feet?: number
+  room_width_feet?: number
+  room_height_feet?: number
 }
 
 export const analysisService = {

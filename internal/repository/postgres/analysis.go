@@ -308,24 +308,25 @@ func (r *PostgresAnalysisRepository) GetResults(ctx context.Context, analysisID 
 
 // CreateRoomInfo inserts room information
 func (r *PostgresAnalysisRepository) CreateRoomInfo(ctx context.Context, info *models.RoomInfo) error {
-	features, err := json.Marshal(info.Features)
-	if err != nil {
-		return fmt.Errorf("failed to marshal features: %w", err)
-	}
-
 	query := `
-		INSERT INTO room_info (id, analysis_id, room_size, ceiling_height, floor_type, features, speaker_placement, additional_notes, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`
+		INSERT INTO room_info (id, analysis_id, room_length_feet, room_width_feet, room_height_feet, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6)`
 
-	_, err = r.db.ExecContext(ctx, query,
+	_, err := r.db.ExecContext(ctx, query,
 		info.ID,
 		info.AnalysisID,
-		info.RoomSize,
-		info.CeilingHeight,
-		info.FloorType,
-		string(features),
-		info.SpeakerPlacement,
-		info.AdditionalNotes,
+		sql.NullFloat64{
+			Float64: info.RoomLengthFeet,
+			Valid:   info.RoomLengthFeet > 0,
+		},
+		sql.NullFloat64{
+			Float64: info.RoomWidthFeet,
+			Valid:   info.RoomWidthFeet > 0,
+		},
+		sql.NullFloat64{
+			Float64: info.RoomHeightFeet,
+			Valid:   info.RoomHeightFeet > 0,
+		},
 		info.CreatedAt)
 
 	return err
@@ -334,35 +335,70 @@ func (r *PostgresAnalysisRepository) CreateRoomInfo(ctx context.Context, info *m
 // GetRoomInfo retrieves room information by analysis ID
 func (r *PostgresAnalysisRepository) GetRoomInfo(ctx context.Context, analysisID uuid.UUID) (*models.RoomInfo, error) {
 	query := `
-		SELECT id, analysis_id, room_size, ceiling_height, floor_type, features, speaker_placement, additional_notes, created_at
+		SELECT id, analysis_id, room_length_feet, room_width_feet, room_height_feet, created_at
 		FROM room_info
 		WHERE analysis_id = $1`
 
 	var info models.RoomInfo
-	var featuresStr sql.NullString
+	var lengthFeet, widthFeet, heightFeet sql.NullFloat64
 
 	err := r.db.QueryRowContext(ctx, query, analysisID).Scan(
 		&info.ID,
 		&info.AnalysisID,
-		&info.RoomSize,
-		&info.CeilingHeight,
-		&info.FloorType,
-		&featuresStr,
-		&info.SpeakerPlacement,
-		&info.AdditionalNotes,
+		&lengthFeet,
+		&widthFeet,
+		&heightFeet,
 		&info.CreatedAt)
 
 	if err != nil {
 		return nil, err
 	}
 
-	if featuresStr.Valid {
-		var features []string
-		if err := json.Unmarshal([]byte(featuresStr.String), &features); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal features: %w", err)
-		}
-		info.Features = features
+	if lengthFeet.Valid {
+		info.RoomLengthFeet = lengthFeet.Float64
+	}
+	if widthFeet.Valid {
+		info.RoomWidthFeet = widthFeet.Float64
+	}
+	if heightFeet.Valid {
+		info.RoomHeightFeet = heightFeet.Float64
 	}
 
 	return &info, nil
+}
+
+// GetRoomDimensions returns just the room dimensions needed for analysis
+func (r *PostgresAnalysisRepository) GetRoomDimensions(ctx context.Context, analysisID uuid.UUID) (*repository.RoomDimensions, error) {
+	query := `
+		SELECT room_length_feet, room_width_feet, room_height_feet
+		FROM room_info
+		WHERE analysis_id = $1`
+
+	var dims repository.RoomDimensions
+	var lengthFeet, widthFeet, heightFeet sql.NullFloat64
+
+	err := r.db.QueryRowContext(ctx, query, analysisID).Scan(
+		&lengthFeet,
+		&widthFeet,
+		&heightFeet)
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			// No room info found - return nil (not an error)
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	if lengthFeet.Valid {
+		dims.LengthFeet = lengthFeet.Float64
+	}
+	if widthFeet.Valid {
+		dims.WidthFeet = widthFeet.Float64
+	}
+	if heightFeet.Valid {
+		dims.HeightFeet = heightFeet.Float64
+	}
+
+	return &dims, nil
 }

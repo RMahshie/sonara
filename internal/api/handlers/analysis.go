@@ -217,15 +217,12 @@ func (h *AnalysisHandler) AddRoomInfo(ctx context.Context, req *models.AddRoomIn
 
 	// Create room info record
 	roomInfo := &models.RoomInfo{
-		ID:               uuid.New().String(),
-		AnalysisID:       analysisID.String(),
-		RoomSize:         req.Body.RoomSize,
-		CeilingHeight:    req.Body.CeilingHeight,
-		FloorType:        req.Body.FloorType,
-		Features:         req.Body.Features,
-		SpeakerPlacement: req.Body.SpeakerPlacement,
-		AdditionalNotes:  req.Body.AdditionalNotes,
-		CreatedAt:        time.Now(),
+		ID:             uuid.New().String(),
+		AnalysisID:     analysisID.String(),
+		RoomLengthFeet: req.Body.RoomLengthFeet,
+		RoomWidthFeet:  req.Body.RoomWidthFeet,
+		RoomHeightFeet: req.Body.RoomHeightFeet,
+		CreatedAt:      time.Now(),
 	}
 
 	if err := h.repo.CreateRoomInfo(ctx, roomInfo); err != nil {

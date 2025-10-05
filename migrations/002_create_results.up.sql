@@ -17,12 +17,9 @@ CREATE INDEX idx_analysis_id ON analysis_results(analysis_id);
 CREATE TABLE room_info (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     analysis_id UUID NOT NULL REFERENCES analyses(id) ON DELETE CASCADE,
-    room_size VARCHAR(50),
-    ceiling_height VARCHAR(50),
-    floor_type VARCHAR(50),
-    features JSONB,
-    speaker_placement VARCHAR(100),
-    additional_notes TEXT,
+    room_length_feet FLOAT,
+    room_width_feet FLOAT,
+    room_height_feet FLOAT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 

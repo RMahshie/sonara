@@ -80,30 +80,28 @@ type GetAnalysisResultsResponse struct {
 
 // RoomInfo represents room configuration information
 type RoomInfo struct {
-	ID               string   `json:"id" doc:"Room info unique identifier"`
-	AnalysisID       string   `json:"analysis_id" doc:"Associated analysis ID"`
-	RoomSize         string   `json:"room_size" enum:"small,medium,large,very_large" doc:"Room size category"`
-	CeilingHeight    string   `json:"ceiling_height" enum:"standard,high,vaulted" doc:"Ceiling height category"`
-	FloorType        string   `json:"floor_type" enum:"carpet,hardwood,tile,rug_on_hard" doc:"Floor material type"`
-	Features         []string `json:"features" doc:"Room features like windows, curtains, panels"`
-	SpeakerPlacement string   `json:"speaker_placement" enum:"desk,stands,shelf,wall" doc:"Speaker placement type"`
-	AdditionalNotes  string   `json:"additional_notes" maxLength:"500" doc:"Additional room notes"`
+	ID         string `json:"id" doc:"Room info unique identifier"`
+	AnalysisID string `json:"analysis_id" doc:"Associated analysis ID"`
 
-	// Room dimensions for acoustic analysis
-	RoomLength float64 `json:"room_length,omitempty" doc:"Room length in meters"`
-	RoomWidth  float64 `json:"room_width,omitempty" doc:"Room width in meters"`
-	RoomHeight float64 `json:"room_height,omitempty" doc:"Room height in meters"`
-
-	// Speaker positioning
-	SpeakerDistanceFromFrontWall float64 `json:"speaker_distance_from_front_wall,omitempty" doc:"Distance from speakers to front wall in meters"`
+	// Room dimensions for acoustic analysis (in feet)
+	RoomLengthFeet float64 `json:"room_length_feet,omitempty" doc:"Room length in feet"`
+	RoomWidthFeet  float64 `json:"room_width_feet,omitempty" doc:"Room width in feet"`
+	RoomHeightFeet float64 `json:"room_height_feet,omitempty" doc:"Room height in feet"`
 
 	CreatedAt time.Time `json:"created_at" doc:"When room info was added"`
 }
 
+// AddRoomInfoRequestBody represents the input data for adding room information
+type AddRoomInfoRequestBody struct {
+	RoomLengthFeet float64 `json:"room_length_feet,omitempty" doc:"Room length in feet"`
+	RoomWidthFeet  float64 `json:"room_width_feet,omitempty" doc:"Room width in feet"`
+	RoomHeightFeet float64 `json:"room_height_feet,omitempty" doc:"Room height in feet"`
+}
+
 // AddRoomInfoRequest represents a request to add room information to an analysis
 type AddRoomInfoRequest struct {
-	ID   string    `path:"id" doc:"Analysis ID"`
-	Body *RoomInfo `json:"-"` // Embedded directly in request body
+	ID   string                 `path:"id" doc:"Analysis ID"`
+	Body AddRoomInfoRequestBody // Request body with client-provided fields
 }
 
 // AddRoomInfoResponse represents the response from adding room information

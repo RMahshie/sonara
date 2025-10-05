@@ -7,6 +7,13 @@ import (
 	"github.com/google/uuid"
 )
 
+// RoomDimensions represents just the room dimensions needed for analysis
+type RoomDimensions struct {
+	LengthFeet float64
+	WidthFeet  float64
+	HeightFeet float64
+}
+
 // AnalysisRepository defines the interface for analysis data operations
 type AnalysisRepository interface {
 	Create(ctx context.Context, analysis *models.Analysis) error
@@ -18,6 +25,7 @@ type AnalysisRepository interface {
 	GetResults(ctx context.Context, analysisID uuid.UUID) (*models.AnalysisResults, error)
 	CreateRoomInfo(ctx context.Context, info *models.RoomInfo) error
 	GetRoomInfo(ctx context.Context, analysisID uuid.UUID) (*models.RoomInfo, error)
+	GetRoomDimensions(ctx context.Context, analysisID uuid.UUID) (*RoomDimensions, error)
 }
 
 // RoomInfoRepository defines the interface for room information operations

@@ -149,15 +149,45 @@ func (s *processingService) ProcessAnalysis(ctx context.Context, analysisID uuid
 		return fmt.Errorf("failed to get analysis: %w", err)
 	}
 
+	// Get room dimensions if available
+	log.Info().Str("analysisID", analysisID.String()).Msg("Checking for room dimensions")
+	roomDims, err := s.repository.GetRoomDimensions(ctx, analysisID)
+	if err != nil {
+		log.Warn().Str("analysisID", analysisID.String()).Err(err).Msg("Failed to get room dimensions, proceeding without them")
+		roomDims = nil
+	}
+
 	// Generate unique result file path
 	resultFile := filepath.Join("/tmp", fmt.Sprintf("%s.result.json", analysisID))
 	defer os.Remove(resultFile) // GUARANTEED cleanup
 
-	// Use configured python command
-	log.Info().Str("analysisID", analysisID.String()).Strs("pythonArgs", s.pythonArgs).Str("scriptPath", s.pythonPath).Str("wavFile", wavFile).Str("signalID", analysis.SignalID).Str("resultFile", resultFile).Msg("Starting Python script execution")
+	// Prepare room data JSON for Python script
+	var roomDataJSON string
+	if roomDims != nil && (roomDims.LengthFeet > 0 || roomDims.WidthFeet > 0 || roomDims.HeightFeet > 0) {
+		roomData := map[string]float64{
+			"room_length_feet": roomDims.LengthFeet,
+			"room_width_feet":  roomDims.WidthFeet,
+			"room_height_feet": roomDims.HeightFeet,
+		}
+		roomDataBytes, err := json.Marshal(roomData)
+		if err != nil {
+			log.Warn().Str("analysisID", analysisID.String()).Err(err).Msg("Failed to marshal room data, proceeding without it")
+		} else {
+			roomDataJSON = string(roomDataBytes)
+			log.Info().Str("analysisID", analysisID.String()).Str("roomData", roomDataJSON).Msg("Room dimensions found, will pass to Python script")
+		}
+	} else {
+		log.Info().Str("analysisID", analysisID.String()).Msg("No room dimensions found, proceeding with basic analysis")
+	}
 
-	// Pass signal ID and result file path to Python script
+	// Use configured python command
+	log.Info().Str("analysisID", analysisID.String()).Strs("pythonArgs", s.pythonArgs).Str("scriptPath", s.pythonPath).Str("wavFile", wavFile).Str("signalID", analysis.SignalID).Str("resultFile", resultFile).Str("roomData", roomDataJSON).Msg("Starting Python script execution")
+
+	// Pass signal ID, result file path, and room data to Python script
 	args := append(s.pythonArgs, wavFile, analysis.SignalID, resultFile)
+	if roomDataJSON != "" {
+		args = append(args, roomDataJSON)
+	}
 	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
 
 	startTime := time.Now()

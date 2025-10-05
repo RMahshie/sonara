@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from 'react'
+import React, { useState, useRef, useCallback, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { analysisService } from '../services/analysisService'
 import ProgressBar from './ProgressBar'
@@ -16,20 +16,55 @@ export const LiveRecorder: React.FC = () => {
     width: '',
     height: ''
   })
+  const [validationErrors, setValidationErrors] = useState({
+    length: '',
+    width: '',
+    height: ''
+  })
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const navigate = useNavigate()
 
+  // Validate individual dimension field
+  const validateDimension = (value: string): string => {
+    if (value === '') return '' // Empty is allowed (partial input)
+
+    const num = parseFloat(value)
+    if (isNaN(num)) return 'Must be a number'
+    if (num <= 0) return 'Use realistic values please'
+    if (num > 50) return 'Use realistic values please'
+    return ''
+  }
+
+  // Update validation errors when dimensions change
+  useEffect(() => {
+    setValidationErrors({
+      length: validateDimension(roomDimensions.length),
+      width: validateDimension(roomDimensions.width),
+      height: validateDimension(roomDimensions.height)
+    })
+  }, [roomDimensions])
+
+  // DEBUG: Track roomDimensions state changes
+  useEffect(() => {
+    console.log('🔄 roomDimensions changed to:', roomDimensions, 'at', new Date().toISOString())
+  }, [roomDimensions])
+
   // Form validation for room dimensions
   const isRoomFormValid = () => {
+    // Check if any dimension has validation errors
+    const hasErrors = Object.values(validationErrors).some(error => error !== '')
+    if (hasErrors) return false
+
     // All empty = valid (skip room analysis)
     if (!roomDimensions.length && !roomDimensions.width && !roomDimensions.height) {
       return true
     }
-    // All filled with valid numbers = valid
+
+    // At least one dimension must be provided and valid
     return [roomDimensions.length, roomDimensions.width, roomDimensions.height]
-      .every(dim => dim === '' || (parseFloat(dim) > 0 && parseFloat(dim) < 50))
+      .some(dim => dim !== '' && parseFloat(dim) > 0 && parseFloat(dim) <= 50)
   }
 
   // Go to room input phase
@@ -40,6 +75,7 @@ export const LiveRecorder: React.FC = () => {
 
   // Start recording logic (shared between entry points)
   const startRecording = useCallback(async () => {
+    console.log('🎙️ Starting recording with roomDimensions:', roomDimensions)
     try {
       // Request microphone access
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -139,15 +175,16 @@ export const LiveRecorder: React.FC = () => {
       setPhase('ready')
       setIsRecording(false)
     }
-  }, [navigate])
+  }, [navigate, roomDimensions])
 
 
   // Entry point from room dimensions form
   const startRecordingWithRoomInfo = useCallback(() => {
+    console.log('▶️ Starting recording with roomDimensions:', roomDimensions)
     setError(null)
     setPhase('recording')
     startRecording()
-  }, [startRecording])
+  }, [startRecording, roomDimensions])
 
   const uploadRecording = async (audioBlob: Blob, mimeType: string) => {
     try {
@@ -164,24 +201,27 @@ export const LiveRecorder: React.FC = () => {
       // Phase 1: Create analysis and get upload URL
       const { id: analysisId, upload_url: uploadUrl } = await analysisService.createAnalysis(sessionId, file, TEST_SIGNAL)
 
+      // DEBUG: Log room dimensions state
+      console.log('🎯 Starting upload process')
+      console.log('📏 Room dimensions state:', roomDimensions)
+      console.log('✅ Condition check:', !!(roomDimensions.length || roomDimensions.width || roomDimensions.height))
+
       // Send room dimensions if provided
       if (roomDimensions.length || roomDimensions.width || roomDimensions.height) {
+        console.log('🚀 Attempting to save room info...')
         try {
           await analysisService.addRoomInfo(analysisId, {
-            room_length: roomDimensions.length ? parseFloat(roomDimensions.length) : undefined,
-            room_width: roomDimensions.width ? parseFloat(roomDimensions.width) : undefined,
-            room_height: roomDimensions.height ? parseFloat(roomDimensions.height) : undefined,
-            room_size: 'medium', // Default values for required fields
-            ceiling_height: 'standard',
-            floor_type: 'hardwood',
-            features: [],
-            speaker_placement: 'desk',
-            additional_notes: ''
+            room_length_feet: roomDimensions.length ? parseFloat(roomDimensions.length) : undefined,
+            room_width_feet: roomDimensions.width ? parseFloat(roomDimensions.width) : undefined,
+            room_height_feet: roomDimensions.height ? parseFloat(roomDimensions.height) : undefined,
           })
+          console.log('✅ Room info saved successfully')
         } catch (err: any) {
-          console.warn('Failed to save room info, continuing with analysis:', err)
+          console.error('❌ Failed to save room info:', err)
           // Don't block the analysis if room info fails
         }
+      } else {
+        console.log('⚠️ Skipping room info - no dimensions provided')
       }
 
       // Upload to S3 with progress (0-50% of total progress)
@@ -269,48 +309,76 @@ export const LiveRecorder: React.FC = () => {
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                   <div>
                     <label className="block text-sm text-racing-green/70 mb-1">
-                      Length (m)
+                      Length (ft)
                     </label>
                     <input
                       type="number"
                       step="0.1"
                       min="0.1"
                       max="50"
-                      placeholder="e.g. 4.5"
-                      className="w-full px-3 py-2 border border-racing-green/30 rounded-md focus:outline-none focus:ring-2 focus:ring-racing-green/50"
+                      placeholder="e.g. 15"
+                      className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 ${
+                        validationErrors.length
+                          ? 'border-red-300 focus:ring-red-200'
+                          : 'border-racing-green/30 focus:ring-racing-green/50'
+                      }`}
                       value={roomDimensions.length}
-                      onChange={(e) => setRoomDimensions(prev => ({...prev, length: e.target.value}))}
+                      onChange={(e) => {
+                        console.log('🔢 Length input changed:', e.target.value)
+                        setRoomDimensions(prev => {
+                          const newState = {...prev, length: e.target.value}
+                          console.log('📏 New roomDimensions state:', newState)
+                          return newState
+                        })
+                      }}
                     />
+                    {validationErrors.length && (
+                      <p className="text-red-500 text-xs mt-1">{validationErrors.length}</p>
+                    )}
                   </div>
                   <div>
                     <label className="block text-sm text-racing-green/70 mb-1">
-                      Width (m)
+                      Width (ft)
                     </label>
                     <input
                       type="number"
                       step="0.1"
                       min="0.1"
                       max="50"
-                      placeholder="e.g. 3.2"
-                      className="w-full px-3 py-2 border border-racing-green/30 rounded-md focus:outline-none focus:ring-2 focus:ring-racing-green/50"
+                      placeholder="e.g. 12"
+                      className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 ${
+                        validationErrors.width
+                          ? 'border-red-300 focus:ring-red-200'
+                          : 'border-racing-green/30 focus:ring-racing-green/50'
+                      }`}
                       value={roomDimensions.width}
                       onChange={(e) => setRoomDimensions(prev => ({...prev, width: e.target.value}))}
                     />
+                    {validationErrors.width && (
+                      <p className="text-red-500 text-xs mt-1">{validationErrors.width}</p>
+                    )}
                   </div>
                   <div>
                     <label className="block text-sm text-racing-green/70 mb-1">
-                      Height (m)
+                      Height (ft)
                     </label>
                     <input
                       type="number"
                       step="0.1"
                       min="0.1"
-                      max="10"
-                      placeholder="e.g. 2.4"
-                      className="w-full px-3 py-2 border border-racing-green/30 rounded-md focus:outline-none focus:ring-2 focus:ring-racing-green/50"
+                      max="50"
+                      placeholder="e.g. 8"
+                      className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 ${
+                        validationErrors.height
+                          ? 'border-red-300 focus:ring-red-200'
+                          : 'border-racing-green/30 focus:ring-racing-green/50'
+                      }`}
                       value={roomDimensions.height}
                       onChange={(e) => setRoomDimensions(prev => ({...prev, height: e.target.value}))}
                     />
+                    {validationErrors.height && (
+                      <p className="text-red-500 text-xs mt-1">{validationErrors.height}</p>
+                    )}
                   </div>
                 </div>
                 <p className="text-xs text-racing-green/50">

@@ -115,15 +115,23 @@ class AudioAnalyzer:
 
     def calculate_room_modes(self, room_data):
         """
-        Calculate theoretical room modes based on room dimensions
-        Returns list of predicted mode frequencies
+        Calculate theoretical room modes based on room dimensions in feet
+        Returns list of predicted mode frequencies, handling partial dimensions gracefully
         """
         try:
-            length = room_data.get('room_length', 0)
-            width = room_data.get('room_width', 0)
-            height = room_data.get('room_height', 0)
+            # Support both old field names (meters) and new field names (feet)
+            length = room_data.get('room_length_feet', room_data.get('room_length', 0))
+            width = room_data.get('room_width_feet', room_data.get('room_width', 0))
+            height = room_data.get('room_height_feet', room_data.get('room_height', 0))
 
-            if not all([length, width, height]):
+            # Convert feet to meters for speed of sound calculation
+            length_m = length * 0.3048 if length > 0 else 0
+            width_m = width * 0.3048 if width > 0 else 0
+            height_m = height * 0.3048 if height > 0 else 0
+
+            # If no dimensions provided, return empty list
+            if not any([length_m, width_m, height_m]):
+                logging.info("No room dimensions provided, skipping room mode calculation")
                 return []
 
             # Speed of sound in air at 20°C (343 m/s)
@@ -132,27 +140,39 @@ class AudioAnalyzer:
             modes = []
 
             # Axial modes (simplest - sound bouncing between 2 parallel surfaces)
-            if length > 0:
-                modes.append(c / (2 * length))  # Length mode
-            if width > 0:
-                modes.append(c / (2 * width))   # Width mode
-            if height > 0:
-                modes.append(c / (2 * height))  # Height mode
+            if length_m > 0:
+                modes.append(c / (2 * length_m))  # Length mode
+                logging.info(f"Length mode: {c / (2 * length_m):.1f} Hz (length: {length} ft = {length_m:.2f} m)")
+            if width_m > 0:
+                modes.append(c / (2 * width_m))   # Width mode
+                logging.info(f"Width mode: {c / (2 * width_m):.1f} Hz (width: {width} ft = {width_m:.2f} m)")
+            if height_m > 0:
+                modes.append(c / (2 * height_m))  # Height mode
+                logging.info(f"Height mode: {c / (2 * height_m):.1f} Hz (height: {height} ft = {height_m:.2f} m)")
 
             # Tangential modes (sound bouncing between 4 surfaces)
-            if length > 0 and width > 0:
-                modes.append(c / (2 * math.sqrt(length**2 + width**2)))
-            if length > 0 and height > 0:
-                modes.append(c / (2 * math.sqrt(length**2 + height**2)))
-            if width > 0 and height > 0:
-                modes.append(c / (2 * math.sqrt(width**2 + height**2)))
+            if length_m > 0 and width_m > 0:
+                tangential_lw = c / (2 * math.sqrt(length_m**2 + width_m**2))
+                modes.append(tangential_lw)
+                logging.info(f"Tangential mode (L×W): {tangential_lw:.1f} Hz")
+            if length_m > 0 and height_m > 0:
+                tangential_lh = c / (2 * math.sqrt(length_m**2 + height_m**2))
+                modes.append(tangential_lh)
+                logging.info(f"Tangential mode (L×H): {tangential_lh:.1f} Hz")
+            if width_m > 0 and height_m > 0:
+                tangential_wh = c / (2 * math.sqrt(width_m**2 + height_m**2))
+                modes.append(tangential_wh)
+                logging.info(f"Tangential mode (W×H): {tangential_wh:.1f} Hz")
 
             # Oblique modes (sound bouncing between all 6 surfaces)
-            if length > 0 and width > 0 and height > 0:
-                modes.append(c / (2 * math.sqrt(length**2 + width**2 + height**2)))
+            if all([length_m > 0, width_m > 0, height_m > 0]):
+                oblique = c / (2 * math.sqrt(length_m**2 + width_m**2 + height_m**2))
+                modes.append(oblique)
+                logging.info(f"Oblique mode (L×W×H): {oblique:.1f} Hz")
 
             # Sort and filter to reasonable frequency range (20Hz - 300Hz)
             modes = sorted([m for m in modes if 20 <= m <= 300])
+            logging.info(f"Filtered to {len(modes)} modes in 20-300Hz range: {[f'{m:.1f}' for m in modes[:8]]}")
 
             return modes[:8]  # Return top 8 predicted modes
 
@@ -330,16 +350,17 @@ class FrequencyAnalyzer:
             logging.warning("Alignment delay too large, using original signal")
             return recorded[:len(reference)] if len(recorded) > len(reference) else recorded
 
-    def analyze_sweep_deconvolution(self, recorded_file, signal_id):
+    def analyze_sweep_deconvolution(self, recorded_file, signal_id, room_data=None):
         """
         Main sweep deconvolution pipeline for frequency response measurement.
 
         Args:
             recorded_file: Path to recorded audio file
             signal_id: Identifier for reference signal (e.g., "sine_sweep_20_20k")
+            room_data: Optional dict with room dimensions in feet (room_length_feet, room_width_feet, room_height_feet)
 
         Returns:
-            tuple: (frequencies, response_db) arrays
+            tuple: (frequencies, response_db, room_modes) - frequencies and response arrays, plus calculated room mode frequencies
         """
         logging.info(f"Starting sweep deconvolution analysis for file: {recorded_file}, signal: {signal_id}")
 
@@ -391,8 +412,17 @@ class FrequencyAnalyzer:
         final_response = self.normalize_response(freqs, smooth_response)
         logging.info("Response normalization completed")
 
-        logging.info(f"Sweep deconvolution analysis completed - final result: {len(freqs)} frequency points")
-        return freqs, final_response
+        # 9. Calculate room modes if room data is available
+        room_modes = []
+        if room_data:
+            logging.info("Step 9: Calculating room modes from provided dimensions")
+            room_modes = self.calculate_room_modes(room_data)
+            logging.info(f"Room modes calculated: {len(room_modes)} modes found")
+        else:
+            logging.info("Step 9: No room data provided, skipping room mode calculation")
+
+        logging.info(f"Sweep deconvolution analysis completed - final result: {len(freqs)} frequency points, {len(room_modes)} room modes")
+        return freqs, final_response, room_modes
 
 
     def deconvolve_signals(self, recorded, reference_sweep, lambda_reg=1e-3):
@@ -543,7 +573,7 @@ def main():
     logging.info(f"Command line arguments: {sys.argv}")
 
     if len(sys.argv) < 3:
-        error_msg = "Usage: python analyze_audio.py <recorded_file> <signal_id> [output_file]"
+        error_msg = "Usage: python analyze_audio.py <recorded_file> <signal_id> [output_file] [room_data_json]"
         logging.error(error_msg)
         print(json.dumps({"error": error_msg}))
         sys.exit(1)
@@ -551,6 +581,7 @@ def main():
     recorded_file = sys.argv[1]
     signal_id = sys.argv[2]
     output_file = sys.argv[3] if len(sys.argv) > 3 else None
+    room_data_json = sys.argv[4] if len(sys.argv) > 4 else None
 
     logging.info(f"Input file: {recorded_file}")
     logging.info(f"Signal ID: {signal_id}")
@@ -558,16 +589,30 @@ def main():
         logging.info(f"Output file: {output_file}")
     else:
         logging.warning("No output file specified, will use stdout (deprecated)")
+    if room_data_json:
+        logging.info(f"Room data provided: {room_data_json}")
+    else:
+        logging.info("No room data provided, using basic analysis")
+
+    # Parse room data JSON if provided
+    room_data = None
+    if room_data_json:
+        try:
+            room_data = json.loads(room_data_json)
+            logging.info(f"Parsed room data: {room_data}")
+        except json.JSONDecodeError as e:
+            logging.error(f"Failed to parse room data JSON: {e}")
+            room_data = None
 
     # Use new FrequencyAnalyzer for sweep deconvolution
     try:
         logging.info("Initializing FrequencyAnalyzer for sweep deconvolution")
         analyzer = FrequencyAnalyzer()
         logging.info("Starting sweep deconvolution analysis")
-        frequencies, response_db = analyzer.analyze_sweep_deconvolution(
-            recorded_file, signal_id
+        frequencies, response_db, room_modes = analyzer.analyze_sweep_deconvolution(
+            recorded_file, signal_id, room_data
         )
-        logging.info(f"Sweep deconvolution completed - generated {len(frequencies)} frequency points")
+        logging.info(f"Sweep deconvolution completed - generated {len(frequencies)} frequency points, {len(room_modes)} room modes")
 
         # Format for frontend with log-spaced resampling
         logging.info(f"Resampling from {len(frequencies)} to 300 log-spaced points")
@@ -587,7 +632,7 @@ def main():
             "fft_size": analyzer.fft_size,
             "reference": signal_id,
             "rt60": 0.5,  # Placeholder - can be calculated from impulse response
-            "room_modes": []  # Placeholder - can be detected from frequency response
+            "room_modes": room_modes  # Calculated room mode frequencies
         }
         logging.info("Sweep deconvolution result prepared successfully")
 
