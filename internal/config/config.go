@@ -1,9 +1,9 @@
 package config
 
 import (
-	"github.com/spf13/viper"
-	"github.com/rs/zerolog/log"
 	"strings"
+
+	"github.com/spf13/viper"
 )
 
 // Config holds all configuration for the application
@@ -103,12 +103,6 @@ func Load() (*Config, error) {
 	config.AWS.S3Endpoint = viper.GetString("S3_ENDPOINT")
 	config.OpenAI.APIKey = viper.GetString("OPENAI_API_KEY")
 	config.Processing.PythonCmd = viper.GetString("PYTHON_CMD")
-
-	// Add this debug logging
-	log.Info().
-	Strs("allowed_origins", config.Server.AllowedOrigins).
-	Int("origin_count", len(config.Server.AllowedOrigins)).
-	Msg("CORS configuration debug")
 
 	return &config, nil
 }
