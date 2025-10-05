@@ -8,9 +8,10 @@ interface FrequencyData {
 
 interface FrequencyChartProps {
   data: FrequencyData[]
+  roomModes?: number[] // Optional array of room mode frequencies
 }
 
-const FrequencyChart = ({ data }: FrequencyChartProps) => {
+const FrequencyChart = ({ data, roomModes }: FrequencyChartProps) => {
   const containerRef = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(800) // fallback width
 
@@ -161,6 +162,24 @@ const FrequencyChart = ({ data }: FrequencyChartProps) => {
           strokeWidth="1"
           opacity="0.3"
         />
+
+        {/* Room mode lines */}
+        {roomModes?.map(mode => {
+          const x = xScale(mode)
+          return (
+            <line
+              key={`room-mode-${mode}`}
+              x1={x}
+              y1={padding}
+              x2={x}
+              y2={height - padding}
+              stroke="#004225"
+              strokeWidth="1"
+              strokeDasharray="4,4"
+              opacity="0.4"
+            />
+          )
+        })}
 
         {/* Axes */}
         <line x1={padding} y1={height - padding} x2={width - padding} y2={height - padding} stroke="#004225" strokeWidth="1"/>

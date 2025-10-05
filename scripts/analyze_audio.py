@@ -19,291 +19,6 @@ import librosa
 from reference_signals import get_reference_manager
 
 
-class AudioAnalyzer:
-    """Audio analyzer with microphone calibration"""
-
-    def __init__(self):
-        # FIFINE K669 USB Microphone calibration curve
-        # Compensates for microphone frequency response
-        self.calibration_curve = [
-            # (20, 12),     # +12dB at 20Hz (mic rolls off)
-            # (50, 3),      # +3dB at 50Hz
-            # (100, 0),     # Flat at 100Hz
-            # (200, 0),     # Flat at 200Hz
-            # (500, 0),     # Flat at 500Hz
-            # (1000, 0),    # Flat at 1kHz (reference)
-            # (2000, -1),   # -1dB at 2kHz
-            # (5000, -2),   # -2dB at 5kHz
-            # (8000, -3),   # -3dB at 8kHz (mic boost)
-            # (10000, -3.5), # -3.5dB at 10kHz
-            # (12000, -4),  # -4dB at 12kHz
-            # (16000, -2),  # -2dB at 16kHz
-            # (20000, 5)    # +5dB at 20kHz (mic rolls off)
-        ]
-
-    def load_audio(self, filepath):
-        """Load audio file and convert to mono"""
-        logging.info(f"Loading audio file: {filepath}")
-        # librosa handles WAV, MP3, FLAC
-        audio, sr = librosa.load(filepath, sr=None, mono=True)
-        duration = len(audio) / sr
-        logging.info(f"Audio loaded successfully - sample rate: {sr}Hz, duration: {duration:.2f}s, samples: {len(audio)}")
-        return audio, sr
-
-    def perform_fft(self, audio, sample_rate):
-        """
-        Perform FFT analysis with proper windowing
-        Returns frequency and magnitude arrays
-        """
-        # Apply Hamming window to reduce spectral leakage
-        windowed = audio * signal.windows.hamming(len(audio))
-
-        # Perform FFT (real FFT since audio is real)
-        fft_result = np.fft.rfft(windowed)
-        magnitude = np.abs(fft_result)
-
-        # Convert to decibels (20*log10)
-        magnitude_db = 20 * np.log10(magnitude + 1e-10)  # Small value to avoid log(0)
-
-        # Generate frequency bins
-        frequencies = np.fft.rfftfreq(len(audio), 1/sample_rate)
-
-        return frequencies, magnitude_db
-
-    def apply_calibration(self, frequencies, magnitudes):
-        """Apply FIFINE K669 calibration curve"""
-        # Extract calibration points
-        cal_freqs, cal_values = zip(*self.calibration_curve)
-
-        # Interpolate calibration values for all frequencies
-        calibration = np.interp(frequencies, cal_freqs, cal_values)
-
-        # Apply calibration (add correction values)
-        calibrated_magnitudes = magnitudes #+ calibration
-
-        return calibrated_magnitudes
-
-    def calculate_rt60(self, audio, sample_rate):
-        """
-        Calculate RT60 (reverberation time) using Schroeder integration
-        Returns time in seconds for 60dB decay
-        """
-        # This is a simplified implementation
-        # Real RT60 requires impulse response or interrupted noise
-        # For now, return placeholder
-        return 0.5  # Will be properly implemented in Week 2
-
-    def detect_room_modes(self, frequencies, magnitudes):
-        """
-        Detect room modes (resonant frequencies)
-        Returns list of problematic frequencies
-        """
-        # Find peaks in frequency response
-        # Simplified for Week 1, enhanced in Week 2
-        from scipy.signal import find_peaks
-
-        # Find peaks that are >6dB above neighbors
-        peaks, properties = find_peaks(magnitudes, prominence=6, distance=20)
-
-        # Return frequencies of peaks below 300Hz (typical room mode range)
-        room_modes = []
-        for peak in peaks:
-            if frequencies[peak] < 300:
-                room_modes.append(float(frequencies[peak]))
-
-        return room_modes[:5]  # Return top 5 modes
-
-    def calculate_room_modes(self, room_data):
-        """
-        Calculate theoretical room modes based on room dimensions in feet
-        Returns list of predicted mode frequencies, handling partial dimensions gracefully
-        """
-        try:
-            # Support both old field names (meters) and new field names (feet)
-            length = room_data.get('room_length_feet', room_data.get('room_length', 0))
-            width = room_data.get('room_width_feet', room_data.get('room_width', 0))
-            height = room_data.get('room_height_feet', room_data.get('room_height', 0))
-
-            # Convert feet to meters for speed of sound calculation
-            length_m = length * 0.3048 if length > 0 else 0
-            width_m = width * 0.3048 if width > 0 else 0
-            height_m = height * 0.3048 if height > 0 else 0
-
-            # If no dimensions provided, return empty list
-            if not any([length_m, width_m, height_m]):
-                logging.info("No room dimensions provided, skipping room mode calculation")
-                return []
-
-            # Speed of sound in air at 20°C (343 m/s)
-            c = 343.0
-
-            modes = []
-
-            # Axial modes (simplest - sound bouncing between 2 parallel surfaces)
-            if length_m > 0:
-                modes.append(c / (2 * length_m))  # Length mode
-                logging.info(f"Length mode: {c / (2 * length_m):.1f} Hz (length: {length} ft = {length_m:.2f} m)")
-            if width_m > 0:
-                modes.append(c / (2 * width_m))   # Width mode
-                logging.info(f"Width mode: {c / (2 * width_m):.1f} Hz (width: {width} ft = {width_m:.2f} m)")
-            if height_m > 0:
-                modes.append(c / (2 * height_m))  # Height mode
-                logging.info(f"Height mode: {c / (2 * height_m):.1f} Hz (height: {height} ft = {height_m:.2f} m)")
-
-            # Tangential modes (sound bouncing between 4 surfaces)
-            if length_m > 0 and width_m > 0:
-                tangential_lw = c / (2 * math.sqrt(length_m**2 + width_m**2))
-                modes.append(tangential_lw)
-                logging.info(f"Tangential mode (L×W): {tangential_lw:.1f} Hz")
-            if length_m > 0 and height_m > 0:
-                tangential_lh = c / (2 * math.sqrt(length_m**2 + height_m**2))
-                modes.append(tangential_lh)
-                logging.info(f"Tangential mode (L×H): {tangential_lh:.1f} Hz")
-            if width_m > 0 and height_m > 0:
-                tangential_wh = c / (2 * math.sqrt(width_m**2 + height_m**2))
-                modes.append(tangential_wh)
-                logging.info(f"Tangential mode (W×H): {tangential_wh:.1f} Hz")
-
-            # Oblique modes (sound bouncing between all 6 surfaces)
-            if all([length_m > 0, width_m > 0, height_m > 0]):
-                oblique = c / (2 * math.sqrt(length_m**2 + width_m**2 + height_m**2))
-                modes.append(oblique)
-                logging.info(f"Oblique mode (L×W×H): {oblique:.1f} Hz")
-
-            # Sort and filter to reasonable frequency range (20Hz - 300Hz)
-            modes = sorted([m for m in modes if 20 <= m <= 300])
-            logging.info(f"Filtered to {len(modes)} modes in 20-300Hz range: {[f'{m:.1f}' for m in modes[:8]]}")
-
-            return modes[:8]  # Return top 8 predicted modes
-
-        except Exception as e:
-            logging.error(f"Error calculating room modes: {e}")
-            return []
-
-    def detect_room_modes_enhanced(self, frequencies, magnitudes, predicted_modes=None):
-        """
-        Enhanced room mode detection that looks for both measured peaks
-        and predicted theoretical modes
-        """
-        room_modes = []
-
-        # First, find measured peaks (existing approach)
-        peaks, properties = find_peaks(magnitudes, prominence=6, distance=20)
-
-        for peak in peaks:
-            if frequencies[peak] < 300:
-                room_modes.append({
-                    "frequency": float(frequencies[peak]),
-                    "magnitude": float(magnitudes[peak]),
-                    "type": "measured_peak"
-                })
-
-        # Second, check for predicted modes if room data is available
-        if predicted_modes:
-            for predicted_freq in predicted_modes:
-                # Look for measured data near predicted frequency (±5Hz)
-                nearby_indices = np.where(
-                    (frequencies >= predicted_freq - 5) &
-                    (frequencies <= predicted_freq + 5)
-                )[0]
-
-                if len(nearby_indices) > 0:
-                    # Find the strongest response in this range
-                    max_idx = nearby_indices[np.argmax(magnitudes[nearby_indices])]
-                    room_modes.append({
-                        "frequency": float(frequencies[max_idx]),
-                        "magnitude": float(magnitudes[max_idx]),
-                        "type": "predicted_mode",
-                        "predicted_freq": predicted_freq
-                    })
-                else:
-                    # No measured data near predicted frequency
-                    room_modes.append({
-                        "frequency": predicted_freq,
-                        "magnitude": None,
-                        "type": "predicted_mode_only",
-                        "predicted_freq": predicted_freq
-                    })
-
-        # Sort by frequency and return top results
-        room_modes.sort(key=lambda x: x["frequency"])
-
-        # Remove duplicates (keep measured peaks over predicted)
-        seen_freqs = set()
-        unique_modes = []
-        for mode in room_modes:
-            freq_rounded = round(mode["frequency"])
-            if freq_rounded not in seen_freqs:
-                seen_freqs.add(freq_rounded)
-                unique_modes.append(mode)
-
-        return unique_modes[:10]  # Return top 10 modes
-
-    def analyze(self, filepath, room_data=None):
-        """Main analysis function"""
-        try:
-            logging.info("Starting basic audio analysis")
-            # Load audio
-            audio, sample_rate = self.load_audio(filepath)
-
-            # Perform FFT
-            logging.info("Performing FFT analysis")
-            frequencies, magnitudes = self.perform_fft(audio, sample_rate)
-            logging.info(f"FFT completed - {len(frequencies)} frequency points generated")
-
-            # Apply calibration
-            logging.info("Applying microphone calibration")
-            calibrated = magnitudes #self.apply_calibration(frequencies, magnitudes)
-            logging.info("Calibration applied successfully")
-
-            # Calculate RT60 (placeholder for Week 1)
-            logging.info("Calculating RT60")
-            rt60 = self.calculate_rt60(audio, sample_rate)
-            logging.info(f"RT60 calculated: {rt60}")
-
-            # Enhanced room mode detection with room data if available
-            logging.info("Detecting room modes")
-            if room_data:
-                logging.info("Using enhanced room mode detection with room data")
-                predicted_modes = self.calculate_room_modes(room_data)
-                room_modes = self.detect_room_modes_enhanced(frequencies, calibrated, predicted_modes)
-            else:
-                logging.info("Using basic room mode detection")
-                # Fallback to original peak detection
-                room_modes = self.detect_room_modes(frequencies, calibrated)
-            logging.info(f"Room modes detected: {len(room_modes)} modes found")
-
-            # Reduce data points for reasonable JSON size
-            # Take every Nth point to get ~1000 points
-            step = max(1, len(frequencies) // 1000)
-            logging.info(f"Reducing data points - step size: {step}, target: ~1000 points")
-
-            # Filter to audible range (20Hz - 20kHz)
-            logging.info("Filtering to audible frequency range (20Hz - 20kHz)")
-            frequency_data = []
-            for i in range(0, len(frequencies), step):
-                if 20 <= frequencies[i] <= 20000:
-                    frequency_data.append({
-                        "frequency": float(frequencies[i]),
-                        "magnitude": float(calibrated[i])
-                    })
-
-            logging.info(f"Final frequency data prepared: {len(frequency_data)} points")
-            result = {
-                "sample_rate": int(sample_rate),
-                "frequency_data": frequency_data,
-                "rt60": rt60,
-                "room_modes": room_modes
-            }
-
-            logging.info("Basic analysis completed successfully")
-            return result
-
-        except Exception as e:
-            logging.error(f"Basic analysis failed: {str(e)}")
-            return {"error": str(e)}
-
-
 class FrequencyAnalyzer:
     """
     Professional frequency response analyzer using sweep deconvolution.
@@ -566,6 +281,72 @@ class FrequencyAnalyzer:
         valid_mask = ~np.isnan(log_magnitudes)
 
         return log_freqs[valid_mask], log_magnitudes[valid_mask]
+
+    def calculate_room_modes(self, room_data, max_modes=5, min_spacing_octaves=1/6):
+        """
+        Calculate room modes (20–300 Hz), then keep only a few that are
+        well-spaced in frequency for clearer visualization.
+
+        - max_modes: cap on how many markers to return
+        - min_spacing_octaves: minimum spacing between kept modes (e.g., 1/3 octave)
+        """
+        try:
+            length = room_data.get('room_length_feet', room_data.get('room_length', 0))
+            width = room_data.get('room_width_feet', room_data.get('room_width', 0))
+            height = room_data.get('room_height_feet', room_data.get('room_height', 0))
+
+            length_m = length * 0.3048 if length > 0 else 0
+            width_m = width * 0.3048 if width > 0 else 0
+            height_m = height * 0.3048 if height > 0 else 0
+
+            if not any([length_m, width_m, height_m]):
+                logging.info("No room dimensions provided, skipping room mode calculation")
+                return []
+
+            c = 343.0
+            modes = []
+
+            # First-order axial fundamentals
+            if length_m > 0:
+                modes.append(c / (2 * length_m))
+            if width_m > 0:
+                modes.append(c / (2 * width_m))
+            if height_m > 0:
+                modes.append(c / (2 * height_m))
+
+            # First-order tangential
+            if length_m > 0 and width_m > 0:
+                modes.append(c / (2 * math.sqrt(length_m**2 + width_m**2)))
+            if length_m > 0 and height_m > 0:
+                modes.append(c / (2 * math.sqrt(length_m**2 + height_m**2)))
+            if width_m > 0 and height_m > 0:
+                modes.append(c / (2 * math.sqrt(width_m**2 + height_m**2)))
+
+            # First-order oblique
+            if all([length_m > 0, width_m > 0, height_m > 0]):
+                modes.append(c / (2 * math.sqrt(length_m**2 + width_m**2 + height_m**2)))
+
+            # Keep only 20–300 Hz as before
+            modes = sorted(m for m in modes if 20 <= m <= 300)
+
+            if not modes:
+                return []
+
+            # Thin by minimum fractional‑octave spacing
+            ratio_threshold = 2 ** min_spacing_octaves
+            kept = []
+            for m in modes:
+                if not kept or (m / kept[-1]) >= ratio_threshold:
+                    kept.append(m)
+                if len(kept) >= max_modes:
+                    break
+
+            logging.info(f"Selected {len(kept)} spaced modes (≤{max_modes}) in 20–300 Hz")
+            return kept
+
+        except Exception as e:
+            logging.error(f"Error calculating room modes: {e}")
+            return []
 
 
 def main():

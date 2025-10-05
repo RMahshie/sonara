@@ -131,7 +131,7 @@ const Results = () => {
 
         <div className="bg-white/70 backdrop-blur-sm rounded-xl p-6 shadow-lg md:col-span-3">
           <h3 className="font-semibold text-racing-green mb-4">Frequency Response</h3>
-          <FrequencyChart data={result.frequency_data || []} />
+          <FrequencyChart data={result.frequency_data || []} roomModes={result.room_modes} />
         </div>
       </div>
 
