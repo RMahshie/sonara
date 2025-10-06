@@ -46,11 +46,6 @@ export const LiveRecorder: React.FC = () => {
     })
   }, [roomDimensions])
 
-  // DEBUG: Track roomDimensions state changes
-  useEffect(() => {
-    console.log('🔄 roomDimensions changed to:', roomDimensions, 'at', new Date().toISOString())
-  }, [roomDimensions])
-
   // Form validation for room dimensions
   const isRoomFormValid = () => {
     // Check if any dimension has validation errors
@@ -201,21 +196,14 @@ export const LiveRecorder: React.FC = () => {
       // Phase 1: Create analysis and get upload URL
       const { id: analysisId, upload_url: uploadUrl } = await analysisService.createAnalysis(sessionId, file, TEST_SIGNAL)
 
-      // DEBUG: Log room dimensions state
-      console.log('🎯 Starting upload process')
-      console.log('📏 Room dimensions state:', roomDimensions)
-      console.log('✅ Condition check:', !!(roomDimensions.length || roomDimensions.width || roomDimensions.height))
-
       // Send room dimensions if provided
       if (roomDimensions.length || roomDimensions.width || roomDimensions.height) {
-        console.log('🚀 Attempting to save room info...')
         try {
           await analysisService.addRoomInfo(analysisId, {
             room_length_feet: roomDimensions.length ? parseFloat(roomDimensions.length) : undefined,
             room_width_feet: roomDimensions.width ? parseFloat(roomDimensions.width) : undefined,
             room_height_feet: roomDimensions.height ? parseFloat(roomDimensions.height) : undefined,
           })
-          console.log('✅ Room info saved successfully')
         } catch (err: any) {
           console.error('❌ Failed to save room info:', err)
           // Don't block the analysis if room info fails
@@ -324,10 +312,8 @@ export const LiveRecorder: React.FC = () => {
                       }`}
                       value={roomDimensions.length}
                       onChange={(e) => {
-                        console.log('🔢 Length input changed:', e.target.value)
                         setRoomDimensions(prev => {
                           const newState = {...prev, length: e.target.value}
-                          console.log('📏 New roomDimensions state:', newState)
                           return newState
                         })
                       }}
