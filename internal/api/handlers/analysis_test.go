@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/RMahshie/sonara/internal/repository"
 	"github.com/RMahshie/sonara/pkg/models"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -59,6 +60,11 @@ func (m *MockAnalysisRepository) CreateRoomInfo(ctx context.Context, info *model
 func (m *MockAnalysisRepository) GetRoomInfo(ctx context.Context, analysisID uuid.UUID) (*models.RoomInfo, error) {
 	args := m.Called(ctx, analysisID)
 	return args.Get(0).(*models.RoomInfo), args.Error(1)
+}
+
+func (m *MockAnalysisRepository) GetRoomDimensions(ctx context.Context, analysisID uuid.UUID) (*repository.RoomDimensions, error) {
+	args := m.Called(ctx, analysisID)
+	return args.Get(0).(*repository.RoomDimensions), args.Error(1)
 }
 
 // MockS3Service implements storage.S3Service for testing
