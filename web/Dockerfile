@@ -16,7 +16,7 @@ ARG VITE_API_URL
 ENV VITE_API_URL=$VITE_API_URL
 RUN npm run build
 
-# Serve with nginx
+# Serve with nginx f
 FROM nginx:alpine
 # Force fresh copy with timestamp
 RUN date > /tmp/build-time.txt
