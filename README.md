@@ -20,3 +20,5 @@ The application features a modern web interface built with React and TypeScript,
 - **Production**: `export ENVIRONMENT=prod`
 
 This allows the same codebase to work with containerized Python in development and direct execution in production.
+
+f
